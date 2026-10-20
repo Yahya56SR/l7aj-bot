@@ -7,7 +7,12 @@ export async function registerCommands(
   clientId: string,
   guildId: string,
 ): Promise<void> {
-  await rest.put(Routes.applicationGuildCommands(clientId, guildId), {
-    body: commands.map((c: any) => c.toJSON()),
-  });
+  try {
+    await rest.put(Routes.applicationGuildCommands(clientId, guildId), {
+      body: commands.map((c: any) => c.toJSON()),
+    });
+  } catch (err) {
+    console.error('Failed to register commands:', err);
+    throw err;
+  }
 }

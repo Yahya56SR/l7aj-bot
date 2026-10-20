@@ -46,5 +46,16 @@
     "title": "✅ Verification",
     "description": "Click the button below to verify yourself and unlock the server.",
     "showUnverify": true
+  },
+
+  "automod": {
+    "blockUrls": true,
+    "blockGifs": true,
+    "gifWhitelistRoles": [],
+    "blockCaps": true,
+    "capsMinLength": 10,
+    "capsMaxPercent": 70,
+    "ignoredChannels": [],
+    "bypassRoles": []
   }
 }

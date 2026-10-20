@@ -27,18 +27,28 @@ export async function handleLevelUp(
     }
   }
 
-  const member = await guild.members.fetch(user.id).catch(() => null);
+  let member;
+  try {
+    member = await guild.members.fetch(user.id);
+  } catch (err) {
+    console.error(`Failed to fetch member ${user.id} in guild ${guild.id}:`, err);
+    return;
+  }
   if (!member) return;
 
   if (rolesToAdd.length > 0) {
-    await member.roles.add(rolesToAdd).catch((err) => {
+    try {
+      await member.roles.add(rolesToAdd);
+    } catch (err) {
       console.error(`Failed to add level role to ${user.id}:`, err);
-    });
+    }
   }
   if (rolesToRemove.length > 0) {
-    await member.roles.remove(rolesToRemove).catch((err) => {
+    try {
+      await member.roles.remove(rolesToRemove);
+    } catch (err) {
       console.error(`Failed to remove old level roles from ${user.id}:`, err);
-    });
+    }
   }
 
   // Announce in the level-up channel, falling back to the channel where the XP was earned

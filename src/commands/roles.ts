@@ -185,19 +185,24 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
   const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(title).setDescription(description);
 
   try {
-    const message = await (channel as TextChannel).send({ embeds: [embed] });
-
     updateConfig((cfg) => {
       cfg.guildId = cfg.guildId || guild.id;
       cfg.roles.panels.push({
         id,
         name,
-        messageId: message.id,
+        messageId: '',
         channelId: channel.id,
         title,
         description,
         buttons: [],
       });
+    });
+
+    const message = await (channel as TextChannel).send({ embeds: [embed] });
+
+    updateConfig((cfg) => {
+      const panel = cfg.roles.panels.find((p) => p.id === id);
+      if (panel) panel.messageId = message.id;
     });
 
     await interaction.reply({
@@ -206,6 +211,10 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
     });
   } catch (err) {
     console.error('Failed to create role panel:', err);
+    // Rollback config on failure
+    updateConfig((cfg) => {
+      cfg.roles.panels = cfg.roles.panels.filter((p) => p.id !== id);
+    });
     await interaction.reply({
       content: 'I could not post in that channel. Check my permissions and try again.',
       ephemeral: true,
@@ -378,8 +387,8 @@ function resolvePanel(idOrName: string): RolePanel | null {
   return (
     panels.find((p) => p.id === idOrName) ||
     panels.find((p) => p.name.toLowerCase() === idOrName.toLowerCase()) ||
-    undefined
-  ) || null;
+    null
+  );
 }
 
 /**
@@ -400,10 +409,15 @@ async function refreshPanel(guild: any, panelId: string): Promise<Message | null
     .setTitle(panel.title)
     .setDescription(panel.description);
 
-  await message.edit({
-    embeds: [embed],
-    components: buildPanelRows(panel.buttons),
-  });
+  try {
+    await message.edit({
+      embeds: [embed],
+      components: buildPanelRows(panel.buttons),
+    });
+  } catch (err) {
+    console.error('Failed to refresh panel message:', err);
+    return null;
+  }
 
   return message;
 }

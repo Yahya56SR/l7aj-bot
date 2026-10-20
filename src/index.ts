@@ -42,18 +42,51 @@ client.commands.set(xpCmd.data.name, xpCmd);
 client.commands.set(verifyCmd.data.name, verifyCmd);
 client.commands.set(configCmd.data.name, configCmd);
 
+let voiceTickInterval: ReturnType<typeof setInterval> | null = null;
+
 client.on('ready', () => {
   console.log(`Logged in as ${client.user?.tag} (${client.user?.id})`);
   // Award voice XP every minute to users still in VC
-  setInterval(() => {
-    void handleVoiceTick(client);
+  voiceTickInterval = setInterval(async () => {
+    try {
+      await handleVoiceTick(client);
+    } catch (err) {
+      console.error('Voice tick error:', err);
+    }
   }, 60 * 1000);
 });
 
-client.on('messageCreate', handleMessageCreate);
-client.on('voiceStateUpdate', handleVoiceStateUpdate);
-client.on('messageReactionAdd', handleReactionAdd);
-client.on('messageReactionRemove', handleReactionRemove);
+client.on('messageCreate', async (message) => {
+  try {
+    await handleMessageCreate(message);
+  } catch (err) {
+    console.error('Message create handler error:', err);
+  }
+});
+
+client.on('voiceStateUpdate', async (oldState, newState) => {
+  try {
+    handleVoiceStateUpdate(oldState, newState);
+  } catch (err) {
+    console.error('Voice state update handler error:', err);
+  }
+});
+
+client.on('messageReactionAdd', async (reaction, user) => {
+  try {
+    await handleReactionAdd(reaction, user);
+  } catch (err) {
+    console.error('Message reaction add handler error:', err);
+  }
+});
+
+client.on('messageReactionRemove', async (reaction, user) => {
+  try {
+    await handleReactionRemove(reaction, user);
+  } catch (err) {
+    console.error('Message reaction remove handler error:', err);
+  }
+});
 
 client.on('interactionCreate', async (interaction) => {
   // Button clicks (role panels + verification)
@@ -93,11 +126,26 @@ client.on('interactionCreate', async (interaction) => {
   } catch (err) {
     console.error(err);
     if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ content: 'There was an error executing that command.', ephemeral: true });
+      await interaction.followUp({ content: 'There was an error executing that command.', ephemeral: true }).catch(() => undefined);
     } else {
-      await interaction.reply({ content: 'There was an error executing that command.', ephemeral: true });
+      await interaction.reply({ content: 'There was an error executing that command.', ephemeral: true }).catch(() => undefined);
     }
   }
+});
+
+// Handle process shutdown gracefully
+process.on('SIGINT', async () => {
+  console.log('Shutting down...');
+  if (voiceTickInterval) clearInterval(voiceTickInterval);
+  client.destroy();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('Shutting down...');
+  if (voiceTickInterval) clearInterval(voiceTickInterval);
+  client.destroy();
+  process.exit(0);
 });
 
 initDb();

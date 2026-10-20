@@ -21,6 +21,25 @@ export interface RolePanel {
   buttons: PanelButton[];
 }
 
+export interface AutomodConfig {
+  /** Block all URLs for everyone */
+  blockUrls: boolean;
+  /** Block GIFs (uploads and URLs) for everyone */
+  blockGifs: boolean;
+  /** Role IDs allowed to send GIF URLs (bypasses blockGifs for URLs) */
+  gifWhitelistRoles: string[];
+  /** Block messages with excessive capitalization */
+  blockCaps: boolean;
+  /** Minimum message length to check for caps */
+  capsMinLength: number;
+  /** Maximum percentage of capital letters allowed (0-100) */
+  capsMaxPercent: number;
+  /** Channels where automod is disabled */
+  ignoredChannels: string[];
+  /** Roles that bypass all automod checks */
+  bypassRoles: string[];
+}
+
 export interface BotConfig {
   token: string;
   clientId: string;
@@ -69,6 +88,7 @@ export interface BotConfig {
     /** Also show a button to remove the role */
     showUnverify: boolean;
   };
+  automod: AutomodConfig;
 }
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -101,6 +121,16 @@ const DEFAULT_CONFIG: BotConfig = {
     title: '✅ Verification',
     description: 'Click the button below to verify yourself and unlock the server.',
     showUnverify: true,
+  },
+  automod: {
+    blockUrls: true,
+    blockGifs: true,
+    gifWhitelistRoles: [],
+    blockCaps: true,
+    capsMinLength: 10,
+    capsMaxPercent: 70,
+    ignoredChannels: [],
+    bypassRoles: [],
   },
 };
 
@@ -179,10 +209,12 @@ export function loadConfig(): BotConfig {
         },
         channels: { ...DEFAULT_CONFIG.channels, ...(parsed.channels || {}) },
         verification: { ...DEFAULT_CONFIG.verification, ...(parsed.verification || {}) },
+        automod: { ...DEFAULT_CONFIG.automod, ...(parsed.automod || {}) },
       };
     }
   } catch (err) {
     console.error('Failed to load config.json:', err);
+    console.warn('Using default configuration.');
   }
   return config;
 }
@@ -192,11 +224,21 @@ export function getConfig(): BotConfig {
 }
 
 export function saveConfig(): void {
-  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  try {
+    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  } catch (err) {
+    console.error('Failed to save config.json:', err);
+    throw err;
+  }
 }
 
 export function updateConfig(mutator: (cfg: BotConfig) => void): BotConfig {
   mutator(config);
-  saveConfig();
+  try {
+    saveConfig();
+  } catch (err) {
+    console.error('Failed to persist config changes:', err);
+    throw err;
+  }
   return config;
 }

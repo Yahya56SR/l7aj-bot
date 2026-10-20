@@ -53,6 +53,16 @@ export async function handleReactionRemove(reaction: Reaction, user: Reactor): P
 
 async function resolveMember(reaction: Reaction, user: Reactor): Promise<GuildMember | null> {
   try {
+    // If the reaction is from a partial, we need to fetch the full message
+    if (reaction.partial) {
+      try {
+        await reaction.fetch();
+      } catch (fetchErr) {
+        console.error('Failed to fetch partial reaction:', fetchErr);
+        return null;
+      }
+    }
+
     if (reaction.message.guild) {
       return await reaction.message.guild.members.fetch(user.id);
     }

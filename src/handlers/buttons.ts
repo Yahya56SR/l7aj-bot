@@ -24,10 +24,13 @@ export function buildPanelRows(buttons: PanelButton[]): ActionRowBuilder<ButtonB
   for (let i = 0; i < buttons.length; i += BUTTONS_PER_ROW) {
     const row = new ActionRowBuilder<ButtonBuilder>();
     for (const entry of buttons.slice(i, i + BUTTONS_PER_ROW)) {
+      const styleValue = Number.isInteger(entry.style) && entry.style >= 1 && entry.style <= 4
+        ? entry.style
+        : ButtonStyle.Secondary;
       const button = new ButtonBuilder()
         .setCustomId(`${ROLE_PREFIX}${entry.roleId}`)
         .setLabel(entry.label)
-        .setStyle((entry.style as ButtonStyle) || ButtonStyle.Secondary);
+        .setStyle(styleValue);
       if (entry.emoji) button.setEmoji(entry.emoji);
       row.addComponents(button);
     }
@@ -57,7 +60,7 @@ async function handleVerification(interaction: ButtonInteraction, grant: boolean
 
   const ver = getConfig().verification;
   if (!ver.roleId) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: 'Verification is not set up. An admin needs to run `/verify setup`.',
       ephemeral: true,
     });
@@ -66,7 +69,7 @@ async function handleVerification(interaction: ButtonInteraction, grant: boolean
 
   const role = await guild.roles.fetch(ver.roleId).catch(() => null);
   if (!role) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: 'The verification role no longer exists. Ask an admin to fix it.',
       ephemeral: true,
     });
@@ -75,7 +78,7 @@ async function handleVerification(interaction: ButtonInteraction, grant: boolean
 
   const error = canAssignRole(guild, role);
   if (error) {
-    await interaction.reply({ content: error, ephemeral: true });
+    await safeReply(interaction, { content: error, ephemeral: true });
     return;
   }
 
@@ -83,30 +86,38 @@ async function handleVerification(interaction: ButtonInteraction, grant: boolean
   const hasRole = member.roles.cache.has(ver.roleId);
 
   if (grant && hasRole) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: `✅ You are already verified (${role.name}).`,
       ephemeral: true,
     });
     return;
   }
   if (!grant && !hasRole) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: `You do not have the ${role.name} role.`,
       ephemeral: true,
     });
     return;
   }
 
-  if (grant) {
-    await member.roles.add(ver.roleId);
-    await interaction.reply({
-      content: `🎉 You have been verified and received the **${role.name}** role. Welcome!`,
-      ephemeral: true,
-    });
-  } else {
-    await member.roles.remove(ver.roleId);
-    await interaction.reply({
-      content: `➖ The **${role.name}** role has been removed.`,
+  try {
+    if (grant) {
+      await member.roles.add(ver.roleId);
+      await safeReply(interaction, {
+        content: `🎉 You have been verified and received the **${role.name}** role. Welcome!`,
+        ephemeral: true,
+      });
+    } else {
+      await member.roles.remove(ver.roleId);
+      await safeReply(interaction, {
+        content: `➖ The **${role.name}** role has been removed.`,
+        ephemeral: true,
+      });
+    }
+  } catch (err) {
+    console.error('Failed to toggle verification role:', err);
+    await safeReply(interaction, {
+      content: 'Something went wrong while updating your roles.',
       ephemeral: true,
     });
   }
@@ -124,7 +135,7 @@ async function handleRoleToggle(interaction: ButtonInteraction): Promise<void> {
 
   const role = await guild.roles.fetch(roleId).catch(() => null);
   if (!role) {
-    await interaction.reply({
+    await safeReply(interaction, {
       content: 'That role no longer exists. Ask an admin to fix the panel.',
       ephemeral: true,
     });
@@ -133,7 +144,7 @@ async function handleRoleToggle(interaction: ButtonInteraction): Promise<void> {
 
   const error = canAssignRole(guild, role);
   if (error) {
-    await interaction.reply({ content: error, ephemeral: true });
+    await safeReply(interaction, { content: error, ephemeral: true });
     return;
   }
 
@@ -143,22 +154,40 @@ async function handleRoleToggle(interaction: ButtonInteraction): Promise<void> {
   try {
     if (hasRole) {
       await member.roles.remove(roleId);
-      await interaction.reply({
+      await safeReply(interaction, {
         content: `➖ Removed the **${role.name}** role.`,
         ephemeral: true,
       });
     } else {
       await member.roles.add(roleId);
-      await interaction.reply({
+      await safeReply(interaction, {
         content: `✅ You now have the **${role.name}** role.`,
         ephemeral: true,
       });
     }
   } catch (err) {
     console.error('Failed to toggle role from button:', err);
-    await interaction.reply({
+    await safeReply(interaction, {
       content: 'Something went wrong while updating your roles.',
       ephemeral: true,
     });
+  }
+}
+
+/**
+ * Safely reply to an interaction, handling cases where it may have already been replied to.
+ */
+async function safeReply(
+  interaction: ButtonInteraction,
+  options: { content: string; ephemeral: boolean },
+): Promise<void> {
+  try {
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp(options).catch(() => undefined);
+    } else {
+      await interaction.reply(options).catch(() => undefined);
+    }
+  } catch {
+    // Ignore errors (interaction expired, missing permissions, etc.)
   }
 }

@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, AttachmentBuilder } from 'discord.js';
+import { SlashCommandBuilder, AttachmentBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { getLeaderboard } from '../db';
 import { levelFromXp } from '../utils/level';
 import { buildLeaderboardEmbed } from '../utils/rankEmbeds';
@@ -15,7 +15,7 @@ export const data = new SlashCommandBuilder()
       .setMaxValue(25),
   );
 
-export async function execute(interaction: any): Promise<void> {
+export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const limit = interaction.options.getInteger('limit') ?? 10;
   const rows = getLeaderboard(limit);
 
@@ -57,6 +57,6 @@ export async function execute(interaction: any): Promise<void> {
       })),
       interaction.guild?.name ?? 'this server',
     );
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] }).catch(() => undefined);
   }
 }

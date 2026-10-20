@@ -16,9 +16,16 @@ function awardVoiceXp(userId: string, minutes: number, guild?: any, user?: any):
   const amount = randomXp(cfg.xp.perVoiceMinuteMin, cfg.xp.perVoiceMinuteMax) * minutes;
   if (amount <= 0) return;
 
-  const { leveledUp, newLevel, oldLevel } = addXp(userId, amount, 'voice');
-  if (leveledUp && guild && user) {
-    void handleLevelUp(guild, user, newLevel, oldLevel);
+  try {
+    const { leveledUp, newLevel, oldLevel } = addXp(userId, amount, 'voice');
+    if (leveledUp && guild && user) {
+      // Use void to fire-and-forget, but catch errors
+      handleLevelUp(guild, user, newLevel, oldLevel).catch((err) => {
+        console.error(`Failed to handle level up for ${userId}:`, err);
+      });
+    }
+  } catch (err) {
+    console.error(`Failed to award voice XP to ${userId}:`, err);
   }
 }
 
@@ -50,7 +57,13 @@ export function handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceStat
 export async function handleVoiceTick(client: Client): Promise<void> {
   const now = Date.now();
 
-  for (const [userId, joinTs] of voiceSessions.entries()) {
+  // Create a snapshot of entries to avoid modification during iteration
+  const sessionEntries: Array<[string, number]> = [];
+  for (const entry of voiceSessions.entries()) {
+    sessionEntries.push(entry);
+  }
+
+  for (const [userId, joinTs] of sessionEntries) {
     const minutesElapsed = Math.floor((now - joinTs) / 60000);
     if (minutesElapsed < 1) continue;
 
@@ -67,8 +80,11 @@ export async function handleVoiceTick(client: Client): Promise<void> {
 
     if (found) {
       // Advance the session timestamp so we award once per minute going forward
-      voiceSessions.set(userId, now - ((now - joinTs) % 60000));
+      // Align to minute boundary to prevent drift
+      const alignedTs = now - ((now - joinTs) % 60000);
+      voiceSessions.set(userId, alignedTs);
     } else {
+      // User no longer in any voice channel in any guild we can see
       voiceSessions.delete(userId);
     }
   }

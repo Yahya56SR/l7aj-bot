@@ -103,6 +103,16 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
   const embed = new EmbedBuilder().setColor(0x57f287).setTitle(title).setDescription(description);
 
   try {
+    updateConfig((cfg) => {
+      cfg.guildId = cfg.guildId || guild.id;
+      cfg.verification.messageId = '';
+      cfg.verification.channelId = channel.id;
+      cfg.verification.roleId = role.id;
+      cfg.verification.title = title;
+      cfg.verification.description = description;
+      cfg.verification.showUnverify = showUnverify;
+    });
+
     const message = await (channel as TextChannel).send({
       embeds: [embed],
       components: [
@@ -119,13 +129,7 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
     });
 
     updateConfig((cfg) => {
-      cfg.guildId = cfg.guildId || guild.id;
       cfg.verification.messageId = message.id;
-      cfg.verification.channelId = channel.id;
-      cfg.verification.roleId = role.id;
-      cfg.verification.title = title;
-      cfg.verification.description = description;
-      cfg.verification.showUnverify = showUnverify;
     });
 
     await interaction.reply({
@@ -134,6 +138,11 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
     });
   } catch (err) {
     console.error('Failed to create verification message:', err);
+    updateConfig((cfg) => {
+      cfg.verification.messageId = '';
+      cfg.verification.channelId = '';
+      cfg.verification.roleId = '';
+    });
     await interaction.reply({
       content: 'I could not post in that channel. Check my permissions and try again.',
       ephemeral: true,

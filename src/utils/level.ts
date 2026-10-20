@@ -44,9 +44,19 @@ export function levelFromXp(totalXp: number): LevelInfo {
   let level = 0;
   let remaining = total;
 
+  // Use a loop with a safety limit to prevent infinite loops
+  // Max level with 32-bit safe integers is around level 30000
+  let iterations = 0;
+  const MAX_ITERATIONS = 100000;
+
   while (remaining >= xpForLevel(level)) {
     remaining -= xpForLevel(level);
     level++;
+    iterations++;
+    if (iterations > MAX_ITERATIONS) {
+      console.error('levelFromXp: Max iterations exceeded, breaking loop');
+      break;
+    }
   }
 
   return {
@@ -80,9 +90,8 @@ export function progressBar(percent: number, size = 20): string {
  * Falls back to `fixed` when the range is missing or invalid.
  */
 export function randomXp(min: number, max: number, fixed?: number): number {
-  const lo = Number.isFinite(min) ? Math.floor(min) : fixed;
-  const hi = Number.isFinite(max) ? Math.floor(max) : lo;
-  if (lo === undefined || hi === undefined) return 0;
+  const lo = Number.isFinite(min) && min >= 0 ? Math.floor(min) : (fixed !== undefined && Number.isFinite(fixed) ? Math.floor(fixed) : 0);
+  const hi = Number.isFinite(max) && max >= 0 ? Math.floor(max) : lo;
   if (hi <= lo) return lo;
   return lo + Math.floor(Math.random() * (hi - lo + 1));
 }

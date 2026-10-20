@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, AttachmentBuilder } from 'discord.js';
+import { SlashCommandBuilder, AttachmentBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { getUser, getRankPosition, countRanked } from '../db';
 import { levelFromXp } from '../utils/level';
 import { buildRankCard } from '../utils/rankEmbeds';
@@ -11,7 +11,7 @@ export const data = new SlashCommandBuilder()
     option.setName('user').setDescription('The user to check').setRequired(false),
   );
 
-export async function execute(interaction: any): Promise<void> {
+export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const target = interaction.options.getUser('user') || interaction.user;
   const guild = interaction.guild;
 
@@ -33,7 +33,7 @@ export async function execute(interaction: any): Promise<void> {
   try {
     const buffer = await rankCard.generate({
       avatarUrl: target.displayAvatarURL({ extension: 'png', size: 256 }),
-      username: target.username,
+      username: target.displayName,
       statusText: null,
       level: info.level,
       rank: position || null,
@@ -55,6 +55,6 @@ export async function execute(interaction: any): Promise<void> {
       guildName: guild?.name ?? 'this server',
       position,
     });
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] }).catch(() => undefined);
   }
 }

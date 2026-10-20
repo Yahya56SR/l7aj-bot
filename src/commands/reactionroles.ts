@@ -88,13 +88,17 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
   const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(title).setDescription(description);
 
   try {
+    updateConfig((cfg) => {
+      cfg.guildId = cfg.guildId || guild.id;
+      cfg.reactionRoles.messageId = '';
+      cfg.reactionRoles.channelId = channel.id;
+      cfg.reactionRoles.mappings = {};
+    });
+
     const message = await (channel as TextChannel).send({ embeds: [embed] });
 
     updateConfig((cfg) => {
-      cfg.guildId = cfg.guildId || guild.id;
       cfg.reactionRoles.messageId = message.id;
-      cfg.reactionRoles.channelId = channel.id;
-      cfg.reactionRoles.mappings = {};
     });
 
     await interaction.reply({
@@ -103,6 +107,11 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
     });
   } catch (err) {
     console.error('Failed to create reaction role message:', err);
+    updateConfig((cfg) => {
+      cfg.reactionRoles.messageId = '';
+      cfg.reactionRoles.channelId = '';
+      cfg.reactionRoles.mappings = {};
+    });
     await interaction.reply({
       content: 'I could not post in that channel. Check my permissions and try again.',
       ephemeral: true,
@@ -149,19 +158,23 @@ async function add(interaction: ChatInputCommandInteraction): Promise<void> {
   }
 
   try {
+    updateConfig((c) => {
+      c.reactionRoles.mappings[emoji] = role.id;
+    });
+
     await message.react(parseEmojiForReact(emoji));
   } catch (err) {
     console.error(`Failed to react with ${emoji}:`, err);
+    // Rollback config on failure
+    updateConfig((c) => {
+      delete c.reactionRoles.mappings[emoji];
+    });
     await interaction.reply({
       content: `I could not react with ${emoji}. Make sure it is a valid emoji (custom emoji must be from this server).`,
       ephemeral: true,
     });
     return;
   }
-
-  updateConfig((c) => {
-    c.reactionRoles.mappings[emoji] = role.id;
-  });
 
   await interaction.reply({
     content: `✅ ${emoji} → <@&${role.id}> added and reacted to the message.`,

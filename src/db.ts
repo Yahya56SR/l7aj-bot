@@ -33,7 +33,12 @@ function load(): DbData {
 }
 
 function save(data: DbData): void {
-  fs.writeFileSync(dbPath, JSON.stringify(data, null, 2));
+  try {
+    fs.writeFileSync(dbPath, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error('Failed to save database:', err);
+    throw err;
+  }
 }
 
 export function initDb(): void {
