@@ -5,7 +5,7 @@ import {
   ButtonStyle,
   GuildMember,
 } from 'discord.js';
-import { getConfig, PanelButton } from '../config';
+import { getConfig, PanelButton, RolePanel } from '../config';
 import { canAssignRole } from '../utils/discord';
 
 export const VERIFY_GRANT = 'verify:grant';
@@ -151,6 +151,16 @@ async function handleRoleToggle(interaction: ButtonInteraction): Promise<void> {
   const member = interaction.member as GuildMember;
   const hasRole = member.roles.cache.has(roleId);
 
+  // Find which panel this role belongs to
+  const config = getConfig();
+  let sourcePanel: RolePanel | null = null;
+  for (const panel of config.roles.panels) {
+    if (panel.buttons.some((b) => b.roleId === roleId)) {
+      sourcePanel = panel;
+      break;
+    }
+  }
+
   try {
     if (hasRole) {
       await member.roles.remove(roleId);
@@ -159,6 +169,17 @@ async function handleRoleToggle(interaction: ButtonInteraction): Promise<void> {
         ephemeral: true,
       });
     } else {
+      // If overrideRoles is enabled for this panel, remove other roles from the same panel
+      if (sourcePanel?.overrideRoles) {
+        const otherRoleIds = sourcePanel.buttons
+          .map((b) => b.roleId)
+          .filter((id) => id !== roleId && member.roles.cache.has(id));
+
+        if (otherRoleIds.length > 0) {
+          await member.roles.remove(otherRoleIds);
+        }
+      }
+
       await member.roles.add(roleId);
       await safeReply(interaction, {
         content: `✅ You now have the **${role.name}** role.`,

@@ -19,6 +19,8 @@ export interface RolePanel {
   title: string;
   description: string;
   buttons: PanelButton[];
+  /** When true, clicking a button in this panel removes all other roles from this panel (for color roles) */
+  overrideRoles?: boolean;
 }
 
 export interface AutomodConfig {
@@ -153,6 +155,7 @@ function migratePanels(raw: any): { panels: RolePanel[] } {
         title: panel.title || '🎭 Self-Assign Roles',
         description: panel.description || 'Click a button to get the role.',
         buttons: Array.isArray(panel.buttons) ? panel.buttons : [],
+        overrideRoles: panel.overrideRoles || false,
       })),
     };
   }
@@ -169,6 +172,7 @@ function migratePanels(raw: any): { panels: RolePanel[] } {
           title: raw.title || '🎭 Self-Assign Roles',
           description: raw.description || 'Click a button to get the role.',
           buttons: Array.isArray(raw.buttons) ? raw.buttons : [],
+          overrideRoles: raw.overrideRoles || false,
         },
       ],
     };

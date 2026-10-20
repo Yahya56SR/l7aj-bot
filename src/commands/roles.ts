@@ -103,6 +103,23 @@ export const data = new SlashCommandBuilder()
               .setRequired(true)
               .setAutocomplete(true),
           ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('config')
+          .setDescription('Configure panel settings')
+          .addStringOption((o) =>
+            o
+              .setName('panel')
+              .setDescription('Panel to configure')
+              .setRequired(true)
+              .setAutocomplete(true),
+          )
+          .addBooleanOption((o) =>
+            o
+              .setName('override-roles')
+              .setDescription('When enabled, clicking a button removes other roles from this panel (for color roles)'),
+          ),
       ),
   );
 
@@ -131,6 +148,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         return list(interaction);
       case 'delete':
         return removePanel(interaction);
+      case 'config':
+        return configPanel(interaction);
       default:
         return;
     }
@@ -367,6 +386,42 @@ async function removePanel(interaction: ChatInputCommandInteraction): Promise<vo
 
   await interaction.reply({
     content: `✅ Panel **${panel.name}** deleted. Members keep any roles they already had.`,
+    ephemeral: true,
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Panel config                                                         */
+/* ------------------------------------------------------------------ */
+
+async function configPanel(interaction: ChatInputCommandInteraction): Promise<void> {
+  const guild = interaction.guild!;
+  const panel = resolvePanel(interaction.options.getString('panel', true));
+  if (!panel) return;
+
+  const overrideRoles = interaction.options.getBoolean('override-roles');
+
+  if (overrideRoles === null) {
+    // Show current config
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle(`⚙️ Panel Config: ${panel.name}`)
+      .addFields(
+        { name: 'Override Roles', value: panel.overrideRoles ? '✅ Enabled' : '❌ Disabled', inline: true },
+        { name: 'Description', value: 'When enabled, clicking a button in this panel will remove all other roles from this panel. Useful for color roles where only one should be active at a time.', inline: false },
+      );
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+    return;
+  }
+
+  updateConfig((c) => {
+    const target = c.roles.panels.find((p) => p.id === panel.id);
+    if (target) target.overrideRoles = overrideRoles;
+  });
+
+  await interaction.reply({
+    content: `✅ Panel **${panel.name}** override roles set to **${overrideRoles ? 'enabled' : 'disabled'}**.`,
     ephemeral: true,
   });
 }
