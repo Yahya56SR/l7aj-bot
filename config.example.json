@@ -1,0 +1,50 @@
+{
+  "token": "YOUR_BOT_TOKEN_HERE",
+  "clientId": "YOUR_APPLICATION_CLIENT_ID_HERE",
+  "guildId": "YOUR_GUILD_ID_HERE",
+
+  "reactionRoles": {
+    "messageId": "REACTION_MESSAGE_ID_HERE",
+    "channelId": "REACTION_CHANNEL_ID_HERE",
+    "mappings": {
+      "👍": "ROLE_ID_FOR_THUMBS_UP",
+      "❤️": "ROLE_ID_FOR_HEART"
+    }
+  },
+
+  "roles": {
+    "panels": []
+  },
+
+  "levelRoles": {
+    "5": "ROLE_ID_FOR_LEVEL_5",
+    "10": "ROLE_ID_FOR_LEVEL_10",
+    "15": "ROLE_ID_FOR_LEVEL_15",
+    "20": "ROLE_ID_FOR_LEVEL_20"
+  },
+
+  "xp": {
+    "perMessageMin": 15,
+    "perMessageMax": 25,
+    "cooldownSeconds": 60,
+    "perVoiceMinuteMin": 5,
+    "perVoiceMinuteMax": 8,
+    "noXpChannels": [],
+    "xpChannel": ""
+  },
+
+  "channels": {
+    "levelUp": "LEVEL_UP_ANNOUNCE_CHANNEL_ID",
+    "logs": "BOT_LOG_CHANNEL_ID",
+    "levelUpMessage": "🎉 Congratulations {user}, you have reached **level {level}**!"
+  },
+
+  "verification": {
+    "messageId": "",
+    "channelId": "",
+    "roleId": "",
+    "title": "✅ Verification",
+    "description": "Click the button below to verify yourself and unlock the server.",
+    "showUnverify": true
+  }
+}

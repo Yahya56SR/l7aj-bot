@@ -1,0 +1,178 @@
+import { GlobalFonts } from '@napi-rs/canvas';
+import fs from 'node:fs';
+import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+
+// Bundled fonts live at the project root so the compiled build in dist/ and the
+// tsx dev run both resolve them to the same place.
+const FONTS_DIR = path.join(__dirname, '..', '..', 'assets', 'fonts');
+// Persistent host dir (survives restarts, outside git-tracked assets).
+const DATA_FONTS_DIR = path.join(__dirname, '..', '..', 'data', 'fonts');
+
+let ready = false;
+const registeredAliases = new Set<string>();
+let emojiDownloadStarted = false;
+
+/**
+ * Bundled Noto coverage (ships with the bot, so rendering is identical on a
+ * bare Linux container and a Windows host): [file, family alias].
+ * Order is fallback priority — Latin first, emoji last so text-style glyphs
+ * (© ★ ♥) keep their text look instead of going full colour.
+ */
+const BUNDLED: Array<[string, string]> = [
+  ['NotoSans-Latin.ttf', 'AtlasSans'],
+  ['NotoSans-LatinExt.ttf', 'AtlasSansExt'],
+  ['NotoSans-Greek.ttf', 'AtlasGreek'],
+  ['NotoSans-Cyrillic.ttf', 'AtlasCyrillic'],
+  ['NotoSans-Vietnamese.ttf', 'AtlasVietnamese'],
+  ['NotoSansArabic-Regular.ttf', 'AtlasArabic'],
+  ['NotoSansHebrew-Regular.ttf', 'AtlasHebrew'],
+  ['NotoSansThai-Regular.ttf', 'AtlasThai'],
+  ['NotoSansDevanagari-Regular.ttf', 'AtlasDevanagari'],
+  ['NotoSansBengali-Regular.ttf', 'AtlasBengali'],
+  ['NotoSansTamil-Regular.ttf', 'AtlasTamil'],
+  // NOTE: the 25MB color-emoji TTF is NOT committed — it is downloaded once
+  // to data/fonts on hosts that have no system emoji font (see below).
+];
+
+/**
+ * Host fonts worth picking up when present. Arial aliases keep the classic
+ * look on hosts that don't ship Arial (Linux VPS); the rest are backups for
+ * scripts the bundle does not cover.
+ */
+const SYSTEM: Array<[string, string]> = [
+  ['/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf', 'Arial'],
+  ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'Arial'],
+  ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 'DejaVu Sans'],
+  ['/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf', 'Noto Color Emoji'],
+  ['C:/Windows/Fonts/arial.ttf', 'Arial'],
+  ['C:/Windows/Fonts/tahoma.ttf', 'Tahoma'],
+  ['C:/Windows/Fonts/yugothic.ttf', 'Yu Gothic'],
+  ['C:/Windows/Fonts/malgun.ttf', 'Malgun Gothic'],
+  ['C:/Windows/Fonts/msyh.ttf', 'Microsoft YaHei'],
+  ['C:/Windows/Fonts/seguiemj.ttf', 'Segoe UI Emoji'],
+  ['C:/Windows/Fonts/seguisym.ttf', 'Segoe UI Symbol'],
+];
+
+/**
+ * One stack for every canvas in the bot. Skia falls back per glyph across the
+ * stack, so a single Arabic word inside a Latin name renders from AtlasArabic
+ * while the rest stays Arial.
+ */
+export const FONT_STACK = [
+  'Arial',
+  'AtlasSans', 'AtlasSansExt', 'AtlasGreek', 'AtlasCyrillic', 'AtlasVietnamese',
+  'AtlasArabic', 'AtlasHebrew', 'AtlasThai',
+  'AtlasDevanagari', 'AtlasBengali', 'AtlasTamil',
+  'Tahoma', 'Yu Gothic', 'Malgun Gothic', 'Microsoft YaHei', 'DejaVu Sans',
+  'Segoe UI Emoji', 'AtlasEmoji', 'Noto Color Emoji', 'Segoe UI Symbol',
+].map((f) => (/\s/.test(f) ? `"${f}"` : f)).join(', ');
+
+/** Register bundled + host fonts. Idempotent — safe to call from every canvas module. */
+export function ensureFonts(): void {
+  if (ready) return;
+  ready = true;
+  const missing: string[] = [];
+
+  for (const [file, alias] of [...BUNDLED, ...SYSTEM]) {
+    const full = file.startsWith('/') || /^[A-Za-z]:/.test(file) ? file : path.join(FONTS_DIR, file);
+    try {
+      if (!fs.existsSync(full)) {
+        if (!file.startsWith('/') && !/^[A-Za-z]:/.test(file)) missing.push(file);
+        continue;
+      }
+      GlobalFonts.registerFromPath(full, alias);
+      registeredAliases.add(alias);
+    } catch (error) {
+      console.error(`[Fonts] Failed to register ${alias} from ${full}:`, error);
+    }
+  }
+
+  if (missing.length) {
+    console.warn(`[Fonts] Missing bundled fonts: ${missing.join(', ')} — those scripts may render as boxes.`);
+  }
+
+  // A manually restored bundle copy still wins if present.
+  try {
+    const bundledEmoji = path.join(FONTS_DIR, EMOJI_FILE);
+    if (!registeredAliases.has('AtlasEmoji') && fs.existsSync(bundledEmoji)) {
+      GlobalFonts.registerFromPath(bundledEmoji, 'AtlasEmoji');
+      registeredAliases.add('AtlasEmoji');
+    }
+  } catch (error) {
+    console.error('[Fonts] Failed to register bundled emoji font:', error);
+  }
+
+  // Color emoji has no usable fallback on minimal hosts — fetch it in the
+  // background when nothing registered an emoji face.
+  const hasEmoji = ['AtlasEmoji', 'Segoe UI Emoji', 'Noto Color Emoji'].some((a) =>
+    registeredAliases.has(a),
+  );
+  if (!hasEmoji) void ensureEmojiFont();
+}
+
+const EMOJI_FILE = 'NotoColorEmoji-Regular.ttf';
+const EMOJI_URLS = [
+  'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notocoloremoji/NotoColorEmoji-Regular.ttf',
+  'https://raw.githubusercontent.com/google/fonts/main/ofl/notocoloremoji/NotoColorEmoji-Regular.ttf',
+];
+const EMOJI_MIN_BYTES = 20_000_000;
+
+/**
+ * One-time ~25MB download to the persistent data dir (NOT the synced repo, so
+ * deploys stay small). Registers the face as soon as it lands — no restart
+ * needed. Never throws; worst case emoji keeps its current fallback.
+ */
+async function ensureEmojiFont(): Promise<void> {
+  if (emojiDownloadStarted) return;
+  emojiDownloadStarted = true;
+  const dest = path.join(DATA_FONTS_DIR, EMOJI_FILE);
+
+  try {
+    if (fs.existsSync(dest)) {
+      if (fs.statSync(dest).size >= EMOJI_MIN_BYTES) {
+        GlobalFonts.registerFromPath(dest, 'AtlasEmoji');
+        registeredAliases.add('AtlasEmoji');
+        console.log('[Fonts] Color emoji loaded from data/fonts.');
+        return;
+      }
+      fs.rmSync(dest, { force: true });
+    }
+  } catch (error) {
+    console.error('[Fonts] Could not reuse cached emoji font:', error);
+    return;
+  }
+
+  for (const url of EMOJI_URLS) {
+    try {
+      console.log(`[Fonts] Downloading Noto Color Emoji (~25MB) via ${new URL(url).host}...`);
+      fs.mkdirSync(DATA_FONTS_DIR, { recursive: true });
+      const res = await fetch(url);
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      const tmp = `${dest}.part`;
+      await pipeline(Readable.fromWeb(res.body as any), fs.createWriteStream(tmp));
+      if (fs.statSync(tmp).size < EMOJI_MIN_BYTES) throw new Error('download incomplete');
+      fs.renameSync(tmp, dest);
+      GlobalFonts.registerFromPath(dest, 'AtlasEmoji');
+      registeredAliases.add('AtlasEmoji');
+      console.log('[Fonts] Color emoji ready.');
+      return;
+    } catch (error) {
+      console.error('[Fonts] Emoji download failed via ' + url + ':', (error as Error)?.message || error);
+    }
+  }
+  console.warn('[Fonts] No color emoji available — emoji may render as boxes until the download succeeds.');
+}
+
+/**
+ * Code-point-safe ellipsis: `text.slice(0, -1)` can split a surrogate pair
+ * and leave a lone surrogate (renders as �), so truncate by code point.
+ */
+export function ellipsize(measure: (text: string) => number, text: string, maxWidth: number): string {
+  if (measure(text) <= maxWidth) return text;
+  const chars = Array.from(text);
+  let end = chars.length;
+  while (end > 1 && measure(`${chars.slice(0, end).join('')}…`) > maxWidth) end--;
+  return `${chars.slice(0, end).join('')}…`;
+}
