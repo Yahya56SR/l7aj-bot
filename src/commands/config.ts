@@ -163,7 +163,7 @@ export const data = new SlashCommandBuilder()
           .addStringOption((opt) =>
             opt
               .setName('image-message')
-              .setDescription('Welcome message template for the welcome card image. Placeholders: {user} {username} {server} {memberCount}')
+              .setDescription('Welcome message template for welcome card. Placeholders: {user} {username} {server} {memberCount}')
               .setRequired(false),
           )
           .addBooleanOption((opt) =>
