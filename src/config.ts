@@ -42,6 +42,13 @@ export interface AutomodConfig {
   bypassRoles: string[];
 }
 
+export interface AutoReactionChannel {
+  /** Channel ID to react in */
+  channelId: string;
+  /** List of emojis to react with (can be unicode or custom emoji IDs like <:name:id> or <a:name:id>) */
+  emojis: string[];
+}
+
 export interface BotConfig {
   token: string;
   clientId: string;
@@ -91,6 +98,8 @@ export interface BotConfig {
     showUnverify: boolean;
   };
   automod: AutomodConfig;
+  /** Auto-reaction configuration: react to every message in specific channels with configured emojis */
+  autoReactions: AutoReactionChannel[];
 }
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -134,6 +143,7 @@ const DEFAULT_CONFIG: BotConfig = {
     ignoredChannels: [],
     bypassRoles: [],
   },
+  autoReactions: [],
 };
 
 const configPath = path.join(__dirname, '..', 'config.json');
@@ -214,6 +224,7 @@ export function loadConfig(): BotConfig {
         channels: { ...DEFAULT_CONFIG.channels, ...(parsed.channels || {}) },
         verification: { ...DEFAULT_CONFIG.verification, ...(parsed.verification || {}) },
         automod: { ...DEFAULT_CONFIG.automod, ...(parsed.automod || {}) },
+        autoReactions: Array.isArray(parsed.autoReactions) ? parsed.autoReactions : [],
       };
     }
   } catch (err) {

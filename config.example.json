@@ -57,5 +57,12 @@
     "capsMaxPercent": 70,
     "ignoredChannels": [],
     "bypassRoles": []
-  }
+  },
+
+  "autoReactions": [
+    {
+      "channelId": "CHANNEL_ID_HERE",
+      "emojis": ["👍", "❤️", "🎉"]
+    }
+  ]
 }

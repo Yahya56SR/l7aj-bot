@@ -65,6 +65,35 @@ export async function handleMessageCreate(message: Message): Promise<void> {
   } catch (err) {
     console.error('Failed to process XP for message:', err);
   }
+
+  // Handle auto-reactions (after XP processing so it doesn't block)
+  try {
+    await handleAutoReactions(message, cfg);
+  } catch (err) {
+    console.error('Auto-reaction failed:', err);
+  }
+}
+
+/**
+ * Add configured reactions to messages in specific channels.
+ */
+async function handleAutoReactions(message: Message, cfg: ReturnType<typeof getConfig>): Promise<void> {
+  const autoReactions = cfg.autoReactions;
+  if (!autoReactions?.length) return;
+
+  const channelConfig = autoReactions.find((ar) => ar.channelId === message.channelId);
+  if (!channelConfig?.emojis?.length) return;
+
+  // React with each configured emoji
+  for (const emoji of channelConfig.emojis) {
+    try {
+      await message.react(emoji);
+      // Small delay to avoid rate limits when reacting with multiple emojis
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    } catch (err) {
+      console.error(`Failed to react with ${emoji}:`, err);
+    }
+  }
 }
 
 /**
