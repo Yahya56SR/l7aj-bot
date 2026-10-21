@@ -12,9 +12,9 @@ export interface WelcomeCardData {
 }
 
 /**
- * Generates a welcome card using a background image.
- * The avatar is placed in the center (black hole area),
- * with welcome text below and member count at the bottom.
+ * Generates a sleek black & white welcome card.
+ * Only black and white are used — no other colors anywhere.
+ * Crisp lines, thin rings, high-contrast text on a black background.
  */
 export class WelcomeCardCanvas {
   width = 1024;
@@ -26,16 +26,16 @@ export class WelcomeCardCanvas {
     const canvas = createCanvas(this.width, this.height);
     const ctx = canvas.getContext('2d');
 
-    // Draw background image
+    // Draw black & white background
     await this.drawBackground(ctx, data);
 
-    // Draw avatar in the center (black hole position)
+    // Draw avatar in the center with a crisp white ring
     await this.drawAvatar(ctx, data.avatarUrl);
 
-    // Draw welcome message (big bright white text)
+    // Draw welcome message — big white text
     this.drawWelcomeText(ctx, data);
 
-    // Draw member count (small light gray text)
+    // Draw member count — black pill badge, white border & text
     this.drawMemberCount(ctx, data.memberCount);
 
     return canvas.toBuffer('image/png');
@@ -48,32 +48,27 @@ export class WelcomeCardCanvas {
 
     try {
       const bgImage = await loadImage(fullBgPath);
-      // Draw background covering entire canvas
       ctx.drawImage(bgImage, 0, 0, this.width, this.height);
     } catch (error) {
-      console.error('[WelcomeCard] Failed to load background image, using fallback:', error);
-      // Fallback gradient background
-      const gradient = ctx.createLinearGradient(0, 0, this.width, this.height);
-      gradient.addColorStop(0, '#0a0a1a');
-      gradient.addColorStop(0.5, '#1a0a2e');
-      gradient.addColorStop(1, '#0a0a1a');
-      ctx.fillStyle = gradient;
+      console.error('[WelcomeCard] Failed to load background image, using black:', error);
+      // Solid black fallback — no colors other than black/white
+      ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, this.width, this.height);
     }
 
-    // Dark overlay for better text readability
+    // Dark overlay for text readability (black only, varying opacity)
     const overlay = ctx.createLinearGradient(0, 0, 0, this.height);
-    overlay.addColorStop(0, 'rgba(0, 0, 0, 0.3)');
-    overlay.addColorStop(0.5, 'rgba(0, 0, 0, 0.5)');
-    overlay.addColorStop(1, 'rgba(0, 0, 0, 0.7)');
+    overlay.addColorStop(0, 'rgba(0, 0, 0, 0.35)');
+    overlay.addColorStop(0.5, 'rgba(0, 0, 0, 0.55)');
+    overlay.addColorStop(1, 'rgba(0, 0, 0, 0.75)');
     ctx.fillStyle = overlay;
     ctx.fillRect(0, 0, this.width, this.height);
   }
 
   private async drawAvatar(ctx: SKRSContext2D, avatarUrl: string): Promise<void> {
     const centerX = this.width / 2;
-    const centerY = this.height / 2 - 30; // Slightly above center for the "black hole"
-    const radius = 110;
+    const centerY = this.height / 2 - 20;
+    const radius = 100;
 
     ctx.save();
     ctx.beginPath();
@@ -86,50 +81,43 @@ export class WelcomeCardCanvas {
         const avatar = await loadImage(avatarUrl);
         const size = Math.max(avatar.width, avatar.height);
         const scale = (radius * 2) / size;
-        const drawWidth = avatar.width * scale;
-        const drawHeight = avatar.height * scale;
-        ctx.drawImage(avatar, centerX - drawWidth / 2, centerY - drawHeight / 2, drawWidth, drawHeight);
+        ctx.drawImage(
+          avatar,
+          centerX - (avatar.width * scale) / 2,
+          centerY - (avatar.height * scale) / 2,
+          avatar.width * scale,
+          avatar.height * scale,
+        );
       } else {
         throw new Error('no avatar');
       }
     } catch {
-      // Fallback gradient avatar
-      const fallback = ctx.createLinearGradient(
-        centerX - radius,
-        centerY - radius,
-        centerX + radius,
-        centerY + radius
-      );
-      fallback.addColorStop(0, '#5865f2');
-      fallback.addColorStop(1, '#a033ff');
-      ctx.fillStyle = fallback;
+      // Black fallback avatar — the white ring below is the only color
+      ctx.fillStyle = '#111111';
       ctx.fillRect(centerX - radius, centerY - radius, radius * 2, radius * 2);
     }
     ctx.restore();
 
-    // Glowing ring around the avatar (black hole event horizon effect)
+    // Crisp white ring around avatar (no glow — sleek, minimal)
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius + 4, 0, Math.PI * 2, true);
-    ctx.strokeStyle = '#ffffff';
+    ctx.arc(centerX, centerY, radius + 3, 0, Math.PI * 2, true);
+    ctx.strokeStyle = '#FFFFFF';
     ctx.lineWidth = 3;
-    ctx.shadowColor = '#ffffff';
-    ctx.shadowBlur = 20;
     ctx.stroke();
-    ctx.shadowBlur = 0;
 
-    // Outer glow ring
+    // Subtle inner highlight for depth (white, low opacity)
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius + 12, 0, Math.PI * 2, true);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.lineWidth = 2;
+    ctx.arc(centerX, centerY, radius - 1, 0, Math.PI * 2, true);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1;
     ctx.stroke();
   }
 
   private drawWelcomeText(ctx: SKRSContext2D, data: WelcomeCardData): void {
     const centerX = this.width / 2;
-    const avatarCenterY = this.height / 2 - 30;
-    const avatarRadius = 110;
-    const textY = avatarCenterY + avatarRadius + 80; // 80px gap below avatar ring
+    const avatarCenterY = this.height / 2 - 20;
+    const avatarRadius = 100;
+    const textY = avatarCenterY + avatarRadius + 90;
 
     // Replace placeholders in welcome message
     const message = data.welcomeMessage
@@ -141,72 +129,61 @@ export class WelcomeCardCanvas {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Main welcome text - big bright white
-    ctx.font = `bold 48px ${FONT_STACK}`;
+    ctx.font = `bold 46px ${FONT_STACK}`;
     ctx.fillStyle = '#FFFFFF';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-    ctx.shadowBlur = 8;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 3;
-    ctx.fillText(this.fitText(ctx, message, this.width - 100), centerX, textY);
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 2;
+    ctx.fillText(this.fitText(ctx, message, this.width - 120), centerX, textY);
     ctx.shadowBlur = 0;
-    ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
   }
 
   private drawMemberCount(ctx: SKRSContext2D, memberCount: number): void {
     const centerX = this.width / 2;
-    const textY = this.height - 50; // Near bottom
+    const textY = this.height - 48;
 
     const memberText = `Member #${memberCount.toLocaleString()}`;
-    
+
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `bold 22px ${FONT_STACK}`;
-    
-    // Measure for background badge
+    ctx.font = `bold 20px ${FONT_STACK}`;
+
     const textMetrics = ctx.measureText(memberText);
     const textWidth = textMetrics.width;
-    const textHeight = 22;
-    
-    const paddingX = 20;
-    const paddingY = 8;
-    const bgX = centerX - textWidth / 2 - paddingX;
-    const bgY = textY - textHeight / 2 - paddingY;
+    const paddingX = 24;
+    const paddingY = 10;
     const bgWidth = textWidth + paddingX * 2;
-    const bgHeight = textHeight + paddingY * 2;
-    const bgRadius = 20;
+    const bgHeight = 36;
+    const bgX = centerX - bgWidth / 2;
+    const bgY = textY - bgHeight / 2;
+    const radius = 18;
 
-    // Draw badge background
+    // Black pill badge with white border
     ctx.save();
     ctx.beginPath();
-    ctx.moveTo(bgX + bgRadius, bgY);
-    ctx.lineTo(bgX + bgWidth - bgRadius, bgY);
-    ctx.quadraticCurveTo(bgX + bgWidth, bgY, bgX + bgWidth, bgY + bgRadius);
-    ctx.lineTo(bgX + bgWidth, bgY + bgHeight - bgRadius);
-    ctx.quadraticCurveTo(bgX + bgWidth, bgY + bgHeight, bgX + bgWidth - bgRadius, bgY + bgHeight);
-    ctx.lineTo(bgX + bgRadius, bgY + bgHeight);
-    ctx.quadraticCurveTo(bgX, bgY + bgHeight, bgX, bgY + bgHeight - bgRadius);
-    ctx.lineTo(bgX, bgY + bgRadius);
-    ctx.quadraticCurveTo(bgX, bgY, bgX + bgRadius, bgY);
+    ctx.moveTo(bgX + radius, bgY);
+    ctx.lineTo(bgX + bgWidth - radius, bgY);
+    ctx.quadraticCurveTo(bgX + bgWidth, bgY, bgX + bgWidth, bgY + radius);
+    ctx.lineTo(bgX + bgWidth, bgY + bgHeight - radius);
+    ctx.quadraticCurveTo(bgX + bgWidth, bgY + bgHeight, bgX + bgWidth - radius, bgY + bgHeight);
+    ctx.lineTo(bgX + radius, bgY + bgHeight);
+    ctx.quadraticCurveTo(bgX, bgY + bgHeight, bgX, bgY + bgHeight - radius);
+    ctx.lineTo(bgX, bgY + radius);
+    ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
     ctx.closePath();
-    
-    const badgeGradient = ctx.createLinearGradient(bgX, bgY, bgX, bgY + bgHeight);
-    badgeGradient.addColorStop(0, 'rgba(88, 101, 242, 0.4)'); // Discord blurple
-    badgeGradient.addColorStop(1, 'rgba(88, 101, 242, 0.2)');
-    ctx.fillStyle = badgeGradient;
+
+    ctx.fillStyle = '#000000';
     ctx.fill();
-    
-    // Badge border
-    ctx.strokeStyle = 'rgba(88, 101, 242, 0.6)';
+    ctx.strokeStyle = '#FFFFFF';
     ctx.lineWidth = 1.5;
     ctx.stroke();
     ctx.restore();
 
     // Member count text
     ctx.fillStyle = '#FFFFFF';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
-    ctx.shadowBlur = 4;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+    ctx.shadowBlur = 3;
     ctx.shadowOffsetY = 1;
     ctx.fillText(memberText, centerX, textY);
     ctx.shadowBlur = 0;

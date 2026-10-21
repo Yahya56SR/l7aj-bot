@@ -47,17 +47,21 @@ const BUNDLED: Array<[string, string]> = [
  * hosts self-heal missing glyph coverage without a redeploy. Only downloaded
  * when the file is missing from assets/fonts.
  */
+// NOTE: google/fonts removed the static JP/KR/SC weights — only the variable
+// [wght] masters remain upstream. Cached files keep their old names (they are
+// download keys, matched against BUNDLED); the content is the variable TTF
+// (default instance = Regular, so rendering is unchanged).
 const FONT_DOWNLOAD_URLS: Record<string, string> = {
   'NotoSansJP-Regular.ttf':
-    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosansjp/NotoSansJP-Regular.ttf',
+    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf',
   'NotoSansKR-Regular.ttf':
-    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskr/NotoSansKR-Regular.ttf',
+    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf',
   'NotoSansSC-Regular.ttf':
-    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanssc/NotoSansSC-Regular.ttf',
+    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf',
   'NotoSansMath-Regular.ttf':
     'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosansmath/NotoSansMath-Regular.ttf',
   'NotoSansEgyptianHieroglyphs-Regular.ttf':
-    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosans-egyptianhieroglyphs/NotoSansEgyptianHieroglyphs-Regular.ttf',
+    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosansegyptianhieroglyphs/NotoSansEgyptianHieroglyphs-Regular.ttf',
 };
 
 /**
@@ -103,19 +107,25 @@ export function ensureFonts(): void {
   const downloading = new Set<string>();
 
   for (const [file, alias] of [...BUNDLED, ...SYSTEM]) {
-    const full = file.startsWith('/') || /^[A-Za-z]:/.test(file) ? file : path.join(FONTS_DIR, file);
+    const isSystem = file.startsWith('/') || /^[A-Za-z]:/.test(file);
+    // Bundled fonts live in assets/fonts OR the persistent data dir (runtime
+    // downloads land there); prefer assets, fall back to data.
+    const candidates = isSystem
+      ? [file]
+      : [path.join(FONTS_DIR, file), path.join(DATA_FONTS_DIR, file)];
     try {
-      if (!fs.existsSync(full)) {
-        if (file.startsWith('/') || /^[A-Za-z]:/.test(file)) continue; // system font not present — skip
-        // Download to the persistent data dir instead of committing the binary to git.
-        void downloadFont(file, alias, downloading);
-        missing.push(file);
+      const full = candidates.find((p) => fs.existsSync(p));
+      if (full) {
+        GlobalFonts.registerFromPath(full, alias);
+        registeredAliases.add(alias);
         continue;
       }
-      GlobalFonts.registerFromPath(full, alias);
-      registeredAliases.add(alias);
+      if (isSystem) continue; // system font not present — skip
+      // Download to the persistent data dir instead of committing the binary to git.
+      void downloadFont(file, alias, downloading);
+      missing.push(file);
     } catch (error) {
-      console.error(`[Fonts] Failed to register ${alias} from ${full}:`, error);
+      console.error(`[Fonts] Failed to register ${alias} from ${file}:`, error);
     }
   }
 

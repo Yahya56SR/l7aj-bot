@@ -17,6 +17,9 @@ config.json
 *.log
 npm-debug.log*
 
+# Preview renders (scripts/preview-welcome.ts output)
+preview-*.png
+
 # Editor / OS
 .vscode/
 .idea/
