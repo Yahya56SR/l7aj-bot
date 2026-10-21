@@ -1,65 +1,46 @@
 # TALABA <3 Discord Bot — Agent Instructions
 
-## Quick Commands
+## Commands
 | Command | Purpose |
 |---------|---------|
-| `npm run dev` | Run with `tsx watch` — restarts on file changes (preferred for dev) |
-| `npm start` | Run via `tsx` — no build step |
-| `npm run build` | Compile TypeScript → `dist/` |
-| `npm run serve` | Run compiled `dist/index.js` |
+| `npm run dev` | `tsx watch src/index.ts` — restarts on code changes (dev) |
+| `npm start` | `tsx src/index.ts` — no build step |
+| `npm run build` | `tsc` → `dist/` |
+| `npm run serve` | `node dist/index.js` |
 | `npm run setup` | Interactive config wizard → writes `config.json` (validates token live) |
 | `npm run doctor` | Diagnose token, permissions, channels, roles, panel messages |
 
 ## Configuration
-- **`config.json`** — runtime config (created by `npm run setup`). Never commit real tokens.
-- **Environment overrides** (bot-hosting.net, etc.): `BOT_TOKEN`, `CLIENT_ID`, `GUILD_ID` — these take precedence over `config.json`.
-- **Database**: `data/talaba.json` (auto-created, persists XP/levels/voice minutes).
+- `config.json` — runtime config (created by `npm run setup`). **Gitignored — never commit real tokens.**
+- `.env` — optional `BOT_TOKEN`, `CLIENT_ID`, `GUILD_ID` overrides (dotenv; `config.json` is the fallback). See `.env.example`.
+- `data/talaba.json` — JSON DB (XP, levels, voice minutes, tickets). Auto-created. **Gitignored.**
+- `dist/` — build output. **Gitignored.**
 
 ## Architecture
-- **Entry**: `src/index.ts` — registers slash commands to the guild on every start, then logs in.
-- **Commands** (`src/commands/`): `rank`, `leaderboard`, `reactionroles`, `roles` (button panels), `levels`, `xp`, `verify`, `config`.
-- **Events** (`src/events/`): `messageCreate` (XP), `voiceStateUpdate` + 1-min tick (voice XP), `messageReactionAdd/Remove` (reaction roles).
-- **Handlers** (`src/handlers/`): `registerCommands` (guild-scoped), `buttons` (role panels + verification), `levelUp` (role rewards + announcement).
-- **Utils**: `level.ts` (MEE6 math), `rankcard.ts` + `rankEmbeds.ts` (PNG/image fallback), `automod.ts`, `discord.ts`.
+- Entry: `src/index.ts` — loads config, inits DB, registers slash commands to the guild, logs in.
+- Commands (`src/commands/`): `rank`, `leaderboard`, `reactionroles`, `roles` (button panels), `levels`, `xp`, `verify`, `config`, `tickets`.
+- Events (`src/events/`): `messageCreate` (XP), `voiceStateUpdate` + 1-min tick (voice XP), `messageReactionAdd/Remove` (reaction roles), `guildMemberAdd/Remove`.
+- Handlers (`src/handlers/`): `registerCommands` (guild-scoped), `buttons` (role panels + verification), `tickets` (panel/modal/transcript), `levelUp` (role rewards + announcement).
+- Utils (`src/utils/`): `level.ts` (MEE6 math), `rankcard.ts` + `rankEmbeds.ts` (PNG/embed fallback), `welcomecard.ts`, `automod.ts`, `discord.ts`, `fonts.ts`.
 
-## Key Behaviors
-- **XP system**: MEE6 parity — 15–25 XP/message (random), 60s cooldown, 5–8 XP/voice minute. Formula: `5*L² + 50*L + 100` per level.
-- **Rank cards / leaderboard**: Rendered as PNG via `@napi-rs/canvas` (prebuilt binaries, no compiler needed). Fonts in `assets/fonts/` cover Latin, Cyrillic, Greek, Vietnamese, Arabic, Hebrew, Thai, Devanagari, Bengali, Tamil. Falls back to text embed on canvas failure.
-- **Level rewards**: Roles granted at milestones; lower-tier reward roles removed automatically.
-- **Button role panels**: Unlimited panels, one button per role, toggle on click. Panel message auto-updates on add/remove.
-- **Verification**: Single button message granting a role; optional unverify button.
+## Key behaviors
+- XP: MEE6 parity — random 15–25 XP/message, 60s cooldown, 5–8 XP/voice minute. Curve: `5*L² + 50*L + 100` per level. Bots ignored by default.
+- Rank cards / leaderboard: PNG via `@napi-rs/canvas` (prebuilt binaries). Fonts in `assets/fonts/`. Falls back to text embed on canvas failure.
+- Level rewards: roles at milestones; lower tiers removed automatically.
+- Button role panels: unlimited panels, one button per role, toggle on click; panel message auto-updates.
+- Verification: single button granting a role; optional unverify button.
+- Tickets: panel + modal form fields, staff/ping roles, transcripts, auto-close.
+- Automod: URL/GIF/caps blocking with whitelists and ignored channels.
+- Welcome/goodbye: optional card image (PNG) or plain text.
 
-## Discord Requirements
-- **Privileged Gateway Intents** (Developer Portal → Bot): Server Members, Message Content, Presence.
-- **Bot permissions**: Manage Roles (must be above any role the bot assigns), Send Messages, Read Message History, View Channels.
-- `npm run doctor` catches role-hierarchy issues and missing intents.
+## Discord requirements
+- Privileged intents (Developer Portal → Bot): **Server Members**, **Message Content**. (Presence is not used.)
+- Bot permissions: Manage Roles (must sit above any role it assigns), Send Messages, Read Message History, View Channels.
+- `npm run doctor` catches role-hierarchy issues, missing intents, and 401 tokens.
 
-## Development Notes
-- **No test suite / linter / formatter configured** — plain TypeScript with `tsc --strict`.
-- **Commands re-register on every start** — run `npm start` after adding new command files.
-- **Config is read at runtime** — changing settings from Discord (slash commands) does **not** restart the bot; `npm run dev` watch only restarts on code changes.
-- **Token validation**: `npm run setup` and `npm run doctor` both hit Discord API to verify the token is a valid **bot token** (not client secret).
-
-## File Layout
-```
-src/
-  index.ts           # bootstrap, event wiring, command registration
-  config.ts          # config load/save/migrate, types
-  db.ts              # JSON file DB (talaba.json) — XP, levels, voice minutes
-  commands/          # slash command implementations
-  events/            # Discord event handlers
-  handlers/          # shared logic (command reg, buttons, level-up)
-  utils/             # level math, rank card rendering, automod, discord helpers
-assets/fonts/        # Noto fonts (SIL OFL) for rank cards
-scripts/
-  setup.js           # interactive config wizard (validates token with Discord)
-  doctor.js          # diagnostics
-config.json          # runtime config (gitignored)
-data/talaba.json     # XP database (gitignored)
-```
-
-## Common Gotchas
-- **Token vs Client Secret**: Both look like `xxx.yyy.zzz`. Only the **Bot Token** (Developer Portal → Bot → Reset Token → Copy) works. `npm run setup` / `doctor` detect 401 and explain this.
-- **Role hierarchy**: If the bot's highest role is below a level-reward or panel role, assignment silently fails. `doctor` flags this.
-- **Guild-scoped commands**: Registered to `guildId` in config. Changing `guildId` requires re-register (restart).
-- **No hot-reload for config**: Slash commands (`/levels setup`, `/roles panel add`, etc.) write to `config.json` but the bot keeps running — no restart needed.
+## Development notes
+- No test suite / linter / formatter — plain TypeScript, `tsc --strict`. Typecheck: `npx tsc --noEmit`.
+- Slash commands re-register to `guildId` on every start — run `npm start` after adding commands.
+- `config.json` is read once at startup; in-Discord slash-command changes write to disk but do **not** restart the bot. `npm run dev` only restarts on code changes.
+- Token vs client secret: both look like `xxx.yyy.zzz`. Only the Bot Token works. `setup`/`doctor` detect 401.
+- Line endings: `.gitattributes` forces LF (`eol=lf`) even on Windows — match existing files when editing.
