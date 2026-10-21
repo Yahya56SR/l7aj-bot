@@ -84,7 +84,64 @@ export const data = new SlashCommandBuilder()
               .addChoices({ name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }),
           )
           .addRoleOption((opt) => opt.setName('role').setDescription('Role to add/remove from bypass list').setRequired(true)),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('attachment-only')
+          .setDescription('Manage channels where messages must have attachments')
+          .addStringOption((opt) =>
+            opt
+              .setName('action')
+              .setDescription('Add or remove a channel')
+              .setRequired(true)
+              .addChoices({ name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }),
+          )
+          .addChannelOption((opt) =>
+            opt.setName('channel').setDescription('Channel to add/remove').setRequired(true).addChannelTypes(ChannelType.GuildText),
+          ),
       ),
+  )
+  .addSubcommandGroup((group) =>
+    group
+      .setName('autoreact')
+      .setDescription('Configure auto-reactions')
+      .addSubcommand((sub) =>
+        sub
+          .setName('add')
+          .setDescription('Add a channel with auto-reactions')
+          .addChannelOption((opt) =>
+            opt.setName('channel').setDescription('Channel to add auto-reactions to').setRequired(true).addChannelTypes(ChannelType.GuildText),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('emojis')
+              .setDescription('Comma-separated list of emojis (unicode or custom like <:name:id>)')
+              .setRequired(true),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('remove')
+          .setDescription('Remove auto-reactions from a channel')
+          .addChannelOption((opt) =>
+            opt.setName('channel').setDescription('Channel to remove auto-reactions from').setRequired(true).addChannelTypes(ChannelType.GuildText),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('edit')
+          .setDescription('Edit emojis for an existing auto-reaction channel')
+          .addChannelOption((opt) =>
+            opt.setName('channel').setDescription('Channel to edit').setRequired(true).addChannelTypes(ChannelType.GuildText),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('emojis')
+              .setDescription('Comma-separated list of emojis (unicode or custom like <:name:id>)')
+              .setRequired(true),
+          ),
+      )
+      .addSubcommand((sub) => sub.setName('list').setDescription('List all auto-reaction channels')),
   );
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -99,6 +156,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   // Handle automod subcommands
   if (subcommandGroup === 'automod') {
     await handleAutomodConfig(interaction, subcommand);
+    return;
+  }
+
+  // Handle auto-react subcommands
+  if (subcommandGroup === 'autoreact') {
+    await handleAutoReactConfig(interaction, subcommand);
     return;
   }
 
@@ -267,6 +330,21 @@ async function handleAutomodConfig(interaction: ChatInputCommandInteraction, sub
       await interaction.reply({ content: `✅ Role ${role} ${action === 'add' ? 'added to' : 'removed from'} bypass roles.`, ephemeral: true });
       break;
     }
+    case 'attachment-only': {
+      const action = interaction.options.getString('action', true);
+      const channel = interaction.options.getChannel('channel', true);
+      updateConfig((c) => {
+        const list = c.automod.attachmentOnlyChannels;
+        if (action === 'add') {
+          if (!list.includes(channel.id)) list.push(channel.id);
+        } else {
+          const idx = list.indexOf(channel.id);
+          if (idx >= 0) list.splice(idx, 1);
+        }
+      });
+      await interaction.reply({ content: `✅ Channel ${channel} ${action === 'add' ? 'added to' : 'removed from'} attachment-only channels.`, ephemeral: true });
+      break;
+    }
   }
 }
 
@@ -280,9 +358,88 @@ function formatAutomod(auto: any): string {
     `**GIF whitelist roles:** ${auto.gifWhitelistRoles?.length ? auto.gifWhitelistRoles.map((id: string) => `<@&${id}>`).join(', ') : '(none)'}`,
     `**Ignored channels:** ${auto.ignoredChannels?.length ? auto.ignoredChannels.map((id: string) => `<#${id}>`).join(', ') : '(none)'}`,
     `**Bypass roles:** ${auto.bypassRoles?.length ? auto.bypassRoles.map((id: string) => `<@&${id}>`).join(', ') : '(none)'}`,
+    `**Attachment-only channels:** ${auto.attachmentOnlyChannels?.length ? auto.attachmentOnlyChannels.map((id: string) => `<#${id}>`).join(', ') : '(none)'}`,
   ].join('\n');
 }
 
 function xpRange(min: number, max: number): string {
   return min === max ? `${min}` : `${min}-${max} (random)`;
+}
+
+async function handleAutoReactConfig(interaction: ChatInputCommandInteraction, subcommand: string): Promise<void> {
+  const cfg = getConfig();
+
+  switch (subcommand) {
+    case 'add': {
+      const channel = interaction.options.getChannel('channel', true);
+      const emojisStr = interaction.options.getString('emojis', true);
+      const emojis = emojisStr.split(',').map((e) => e.trim()).filter((e) => e.length > 0);
+
+      if (emojis.length === 0) {
+        await interaction.reply({ content: '❌ Please provide at least one emoji.', ephemeral: true });
+        return;
+      }
+
+      updateConfig((c) => {
+        // Remove existing entry for this channel if any
+        c.autoReactions = c.autoReactions.filter((ar) => ar.channelId !== channel.id);
+        // Add new entry
+        c.autoReactions.push({ channelId: channel.id, emojis });
+      });
+
+      await interaction.reply({ content: `✅ Added auto-reactions to ${channel} with emojis: ${emojis.join(' ')}`, ephemeral: true });
+      break;
+    }
+    case 'remove': {
+      const channel = interaction.options.getChannel('channel', true);
+      updateConfig((c) => {
+        c.autoReactions = c.autoReactions.filter((ar) => ar.channelId !== channel.id);
+      });
+      await interaction.reply({ content: `✅ Removed auto-reactions from ${channel}.`, ephemeral: true });
+      break;
+    }
+    case 'edit': {
+      const channel = interaction.options.getChannel('channel', true);
+      const emojisStr = interaction.options.getString('emojis', true);
+      const emojis = emojisStr.split(',').map((e) => e.trim()).filter((e) => e.length > 0);
+
+      if (emojis.length === 0) {
+        await interaction.reply({ content: '❌ Please provide at least one emoji.', ephemeral: true });
+        return;
+      }
+
+      const existing = cfg.autoReactions.find((ar) => ar.channelId === channel.id);
+      if (!existing) {
+        await interaction.reply({ content: `❌ No auto-reactions configured for ${channel}. Use \`/config autoreact add\` instead.`, ephemeral: true });
+        return;
+      }
+
+      updateConfig((c) => {
+        const idx = c.autoReactions.findIndex((ar) => ar.channelId === channel.id);
+        if (idx >= 0) {
+          c.autoReactions[idx].emojis = emojis;
+        }
+      });
+
+      await interaction.reply({ content: `✅ Updated auto-reactions for ${channel} with emojis: ${emojis.join(' ')}`, ephemeral: true });
+      break;
+    }
+    case 'list': {
+      const autoReactions = cfg.autoReactions;
+      if (!autoReactions.length) {
+        await interaction.reply({ content: 'No auto-reaction channels configured.', ephemeral: true });
+        return;
+      }
+
+      const lines = autoReactions.map((ar) => `<#${ar.channelId}>: ${ar.emojis.join(' ')}`);
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle('🤖 Auto-Reaction Channels')
+        .setDescription(lines.join('\n'))
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+      break;
+    }
+  }
 }

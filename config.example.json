@@ -56,7 +56,8 @@
     "capsMinLength": 10,
     "capsMaxPercent": 70,
     "ignoredChannels": [],
-    "bypassRoles": []
+    "bypassRoles": [],
+    "attachmentOnlyChannels": []
   },
 
   "autoReactions": [

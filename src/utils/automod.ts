@@ -55,6 +55,11 @@ function hasGifWhitelistRole(message: Message, gifWhitelistRoles: string[]): boo
   return message.member.roles.cache.some((role) => gifWhitelistRoles.includes(role.id));
 }
 
+/** Check if message has attachments */
+function hasAttachments(message: Message): boolean {
+  return message.attachments.size > 0;
+}
+
 /** Send a temporary warning message */
 async function sendWarning(message: Message, content: string): Promise<void> {
   if (!message.guild) return;
@@ -84,6 +89,19 @@ export async function runAutomod(message: Message): Promise<boolean> {
 
   // Check if user has bypass role
   if (automod.bypassRoles?.length && hasBypassRole(message, automod.bypassRoles)) return false;
+
+  // Check for attachment-only channels
+  if (automod.attachmentOnlyChannels?.includes(message.channelId)) {
+    if (!hasAttachments(message)) {
+      try {
+        await message.delete();
+      } catch {
+        // Ignore delete errors
+      }
+      await sendWarning(message, `❌ ${message.author}, messages in this channel must have an attachment.`);
+      return true;
+    }
+  }
 
   // Check for URLs
   if (automod.blockUrls && hasUrl(message.content)) {

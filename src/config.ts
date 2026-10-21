@@ -40,6 +40,8 @@ export interface AutomodConfig {
   ignoredChannels: string[];
   /** Roles that bypass all automod checks */
   bypassRoles: string[];
+  /** Channels where messages must have attachments */
+  attachmentOnlyChannels: string[];
 }
 
 export interface AutoReactionChannel {
@@ -142,6 +144,7 @@ const DEFAULT_CONFIG: BotConfig = {
     capsMaxPercent: 70,
     ignoredChannels: [],
     bypassRoles: [],
+    attachmentOnlyChannels: [],
   },
   autoReactions: [],
 };
