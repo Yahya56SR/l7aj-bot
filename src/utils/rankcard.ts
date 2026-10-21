@@ -279,7 +279,7 @@ export class LeaderboardCanvas {
     ctx.clip();
     try {
       const avatar = await loadImage(row.avatarUrl);
-      const size = Math.max(avatar.width, avatar.height);
+      const size = radius * 2;
       ctx.drawImage(avatar, avatarX - size / 2, centerY - size / 2, size, size);
     } catch {
       ctx.fillStyle = '#5865f2';
