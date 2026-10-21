@@ -54,8 +54,10 @@ export interface AutoReactionChannel {
 export interface WelcomeConfig {
   /** Channel to send welcome messages */
   channelId: string;
-  /** Custom welcome message template. Placeholders: {user} {username} {server} {memberCount} */
+  /** Custom welcome message template for Discord message. Placeholders: {user} {username} {server} {memberCount} */
   message: string;
+  /** Custom welcome message template for the welcome card image. Placeholders: {user} {username} {server} {memberCount} */
+  welcomeImageMessage: string;
   /** Background image path (relative to project root) */
   backgroundImage: string;
   /** Whether to send welcome card as image */
@@ -69,6 +71,75 @@ export interface GoodbyeConfig {
   message: string;
   /** Whether goodbye messages are enabled */
   enabled: boolean;
+}
+
+export interface TicketFormField {
+  /** Unique identifier for this field */
+  id: string;
+  /** Label shown to the user */
+  label: string;
+  /** Placeholder text */
+  placeholder?: string;
+  /** Field type */
+  type: 'short' | 'paragraph';
+  /** Whether this field is required */
+  required: boolean;
+  /** Maximum length (for short fields) */
+  maxLength?: number;
+  /** Minimum length */
+  minLength?: number;
+}
+
+export interface TicketPanel {
+  /** Unique internal id */
+  id: string;
+  /** Human readable name */
+  name: string;
+  /** Channel where the panel message is posted */
+  channelId: string;
+  /** Message ID of the panel */
+  messageId: string;
+  /** Embed title */
+  title: string;
+  /** Embed description */
+  description: string;
+  /** Button label */
+  buttonLabel: string;
+  /** Button emoji (unicode or custom) */
+  buttonEmoji?: string;
+  /** Button style */
+  buttonStyle: number;
+  /** Category where ticket channels are created */
+  categoryId: string;
+  /** Role(s) that can see and manage tickets (staff roles) */
+  staffRoles: string[];
+  /** Role(s) that are pinged when a ticket is created */
+  pingRoles: string[];
+  /** Custom form fields for this panel */
+  formFields: TicketFormField[];
+  /** Welcome message sent in the ticket channel (placeholders: {user}, {panel}) */
+  welcomeMessage: string;
+  /** Whether to ping staff roles in the welcome message */
+  pingOnCreate: boolean;
+  /** Auto-close after this many hours of inactivity (0 = disabled) */
+  autoCloseHours: number;
+  /** Whether transcripts are enabled for this panel */
+  transcriptsEnabled: boolean;
+  /** Channel to send transcripts to (if different from logs channel) */
+  transcriptChannelId?: string;
+}
+
+export interface TicketConfig {
+  /** Category where all ticket channels are created */
+  categoryId: string;
+  /** Default staff roles (used when panel doesn't specify) */
+  defaultStaffRoles: string[];
+  /** Default ping roles */
+  defaultPingRoles: string[];
+  /** Panels */
+  panels: TicketPanel[];
+  /** Log channel for ticket events (open, close, claim, etc.) */
+  logChannelId: string;
 }
 
 export interface BotConfig {
@@ -126,6 +197,8 @@ export interface BotConfig {
   welcome: WelcomeConfig;
   /** Goodbye message configuration */
   goodbye: GoodbyeConfig;
+  /** Ticket system configuration */
+  tickets: TicketConfig;
 }
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -174,6 +247,7 @@ const DEFAULT_CONFIG: BotConfig = {
   welcome: {
     channelId: '',
     message: 'Welcome {user} to {server}! 🎉',
+    welcomeImageMessage: 'Welcome to {server}, {username}! 🎉',
     backgroundImage: 'assets/bg.jpg',
     enabled: false,
   },
@@ -181,6 +255,13 @@ const DEFAULT_CONFIG: BotConfig = {
     channelId: '',
     message: 'Goodbye {username}, we\'ll miss you! 👋',
     enabled: false,
+  },
+  tickets: {
+    categoryId: '',
+    defaultStaffRoles: [],
+    defaultPingRoles: [],
+    panels: [],
+    logChannelId: '',
   },
 };
 
@@ -265,6 +346,11 @@ export function loadConfig(): BotConfig {
         autoReactions: Array.isArray(parsed.autoReactions) ? parsed.autoReactions : [],
         welcome: { ...DEFAULT_CONFIG.welcome, ...(parsed.welcome || {}) },
         goodbye: { ...DEFAULT_CONFIG.goodbye, ...(parsed.goodbye || {}) },
+        tickets: {
+          ...DEFAULT_CONFIG.tickets,
+          ...(parsed.tickets || {}),
+          panels: Array.isArray(parsed.tickets?.panels) ? parsed.tickets.panels : [],
+        },
       };
     }
   } catch (err) {

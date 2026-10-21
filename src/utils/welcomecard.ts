@@ -5,7 +5,7 @@ import path from 'path';
 
 export interface WelcomeCardData {
   avatarUrl: string;
-  username: string;
+  displayName: string;
   guildName: string;
   memberCount: number;
   welcomeMessage: string;
@@ -127,12 +127,14 @@ export class WelcomeCardCanvas {
 
   private drawWelcomeText(ctx: SKRSContext2D, data: WelcomeCardData): void {
     const centerX = this.width / 2;
-    const textY = this.height / 2 + 110; // Below avatar
+    const avatarCenterY = this.height / 2 - 30;
+    const avatarRadius = 110;
+    const textY = avatarCenterY + avatarRadius + 80; // 80px gap below avatar ring
 
     // Replace placeholders in welcome message
     const message = data.welcomeMessage
-      .replace(/{user}/g, `<@${data.username}>`) // Will be replaced with mention in actual send
-      .replace(/{username}/g, data.username)
+      .replace(/{user}/g, `<@${data.displayName}>`) // Will be replaced with mention in actual send
+      .replace(/{username}/g, data.displayName)
       .replace(/{server}/g, data.guildName)
       .replace(/{memberCount}/g, data.memberCount.toString());
 
@@ -142,21 +144,73 @@ export class WelcomeCardCanvas {
     // Main welcome text - big bright white
     ctx.font = `bold 48px ${FONT_STACK}`;
     ctx.fillStyle = '#FFFFFF';
-    ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
-    ctx.shadowBlur = 15;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 3;
     ctx.fillText(this.fitText(ctx, message, this.width - 100), centerX, textY);
     ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
   }
 
   private drawMemberCount(ctx: SKRSContext2D, memberCount: number): void {
     const centerX = this.width / 2;
-    const textY = this.height - 60; // Near bottom
+    const textY = this.height - 50; // Near bottom
 
+    const memberText = `Member #${memberCount.toLocaleString()}`;
+    
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `20px ${FONT_STACK}`;
-    ctx.fillStyle = '#b9bbbe'; // Light gray (Discord's secondary text color)
-    ctx.fillText(`Member #${memberCount.toLocaleString()}`, centerX, textY);
+    ctx.font = `bold 22px ${FONT_STACK}`;
+    
+    // Measure for background badge
+    const textMetrics = ctx.measureText(memberText);
+    const textWidth = textMetrics.width;
+    const textHeight = 22;
+    
+    const paddingX = 20;
+    const paddingY = 8;
+    const bgX = centerX - textWidth / 2 - paddingX;
+    const bgY = textY - textHeight / 2 - paddingY;
+    const bgWidth = textWidth + paddingX * 2;
+    const bgHeight = textHeight + paddingY * 2;
+    const bgRadius = 20;
+
+    // Draw badge background
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(bgX + bgRadius, bgY);
+    ctx.lineTo(bgX + bgWidth - bgRadius, bgY);
+    ctx.quadraticCurveTo(bgX + bgWidth, bgY, bgX + bgWidth, bgY + bgRadius);
+    ctx.lineTo(bgX + bgWidth, bgY + bgHeight - bgRadius);
+    ctx.quadraticCurveTo(bgX + bgWidth, bgY + bgHeight, bgX + bgWidth - bgRadius, bgY + bgHeight);
+    ctx.lineTo(bgX + bgRadius, bgY + bgHeight);
+    ctx.quadraticCurveTo(bgX, bgY + bgHeight, bgX, bgY + bgHeight - bgRadius);
+    ctx.lineTo(bgX, bgY + bgRadius);
+    ctx.quadraticCurveTo(bgX, bgY, bgX + bgRadius, bgY);
+    ctx.closePath();
+    
+    const badgeGradient = ctx.createLinearGradient(bgX, bgY, bgX, bgY + bgHeight);
+    badgeGradient.addColorStop(0, 'rgba(88, 101, 242, 0.4)'); // Discord blurple
+    badgeGradient.addColorStop(1, 'rgba(88, 101, 242, 0.2)');
+    ctx.fillStyle = badgeGradient;
+    ctx.fill();
+    
+    // Badge border
+    ctx.strokeStyle = 'rgba(88, 101, 242, 0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    // Member count text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 1;
+    ctx.fillText(memberText, centerX, textY);
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
   }
 
   private fitText(ctx: SKRSContext2D, text: string, maxWidth: number): string {

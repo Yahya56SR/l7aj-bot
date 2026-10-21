@@ -150,14 +150,20 @@ export const data = new SlashCommandBuilder()
       .addSubcommand((sub) =>
         sub
           .setName('setup')
-          .setDescription('Set up welcome channel and message')
+          .setDescription('Set up welcome channel and messages')
           .addChannelOption((opt) =>
             opt.setName('channel').setDescription('Channel to send welcome messages').setRequired(true).addChannelTypes(ChannelType.GuildText),
           )
           .addStringOption((opt) =>
             opt
               .setName('message')
-              .setDescription('Welcome message template. Placeholders: {user} {username} {server} {memberCount}')
+              .setDescription('Welcome message template for Discord chat. Placeholders: {user} {username} {server} {memberCount}')
+              .setRequired(false),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('image-message')
+              .setDescription('Welcome message template for the welcome card image. Placeholders: {user} {username} {server} {memberCount}')
               .setRequired(false),
           )
           .addBooleanOption((opt) =>
@@ -328,7 +334,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       {
         name: 'Welcome',
         value: cfg.welcome.enabled
-          ? `✅ Enabled · Channel: <#${cfg.welcome.channelId}>\nMessage: \`${cfg.welcome.message}\`\nBackground: \`${cfg.welcome.backgroundImage}\``
+          ? `✅ Enabled · Channel: <#${cfg.welcome.channelId}>\nDiscord Message: \`${cfg.welcome.message}\`\nImage Message: \`${cfg.welcome.welcomeImageMessage || '(uses Discord message)'}\`\nBackground: \`${cfg.welcome.backgroundImage}\``
           : '❌ Disabled',
         inline: false,
       },
@@ -614,10 +620,10 @@ async function handleWelcomeConfig(interaction: ChatInputCommandInteraction, sub
 
       const cardBuffer = await welcomeCard.generate({
         avatarUrl,
-        username: interaction.user.username,
+        displayName: interaction.user.displayName,
         guildName: interaction.guild!.name,
         memberCount: totalMemberCount,
-        welcomeMessage: cfg.welcome.message,
+        welcomeMessage: cfg.welcome.welcomeImageMessage || cfg.welcome.message,
       });
 
       const { AttachmentBuilder } = await import('discord.js');

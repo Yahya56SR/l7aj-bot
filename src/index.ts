@@ -5,6 +5,7 @@ import { getConfig, loadConfig } from './config';
 import { initDb, initializeTotalMembers } from './db';
 import { registerCommands } from './handlers/registerCommands';
 import { handleButtonInteraction } from './handlers/buttons';
+import { handleTicketButton, handleTicketModal } from './handlers/tickets';
 import * as rankCmd from './commands/rank';
 import * as leaderboardCmd from './commands/leaderboard';
 import * as reactionRolesCmd from './commands/reactionroles';
@@ -13,6 +14,7 @@ import * as levelsCmd from './commands/levels';
 import * as xpCmd from './commands/xp';
 import * as verifyCmd from './commands/verify';
 import * as configCmd from './commands/config';
+import * as ticketsCmd from './commands/tickets';
 import { handleMessageCreate } from './events/messageCreate';
 import { handleVoiceStateUpdate, handleVoiceTick } from './events/voiceStateUpdate';
 import { handleReactionAdd, handleReactionRemove } from './events/messageReaction';
@@ -42,6 +44,7 @@ client.commands.set(levelsCmd.data.name, levelsCmd);
 client.commands.set(xpCmd.data.name, xpCmd);
 client.commands.set(verifyCmd.data.name, verifyCmd);
 client.commands.set(configCmd.data.name, configCmd);
+client.commands.set(ticketsCmd.data.name, ticketsCmd);
 
 let voiceTickInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -128,8 +131,41 @@ client.on('guildMemberRemove', async (member) => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-  // Button clicks (role panels + verification)
+  // Ticket modal submissions
+  if (interaction.isModalSubmit()) {
+    try {
+      const handled = await handleTicketModal(interaction);
+      if (!handled) {
+        // Let other handlers deal with it if needed
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'Interaction not recognized.', ephemeral: true });
+        }
+      }
+    } catch (err) {
+      console.error('Ticket modal handler error:', err);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: 'Something went wrong handling that form.', ephemeral: true }).catch(() => undefined);
+      }
+    }
+    return;
+  }
+
+  // Button clicks (role panels + verification + tickets)
   if (interaction.isButton()) {
+    const customId = interaction.customId;
+    if (customId.startsWith('ticket:')) {
+      try {
+        await handleTicketButton(interaction);
+      } catch (err) {
+        console.error('Ticket button interaction failed:', err);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction
+            .reply({ content: 'Something went wrong handling that ticket button.', ephemeral: true })
+            .catch(() => undefined);
+        }
+      }
+      return;
+    }
     try {
       await handleButtonInteraction(interaction);
     } catch (err) {
@@ -198,6 +234,7 @@ const commands = [
   xpCmd.data,
   verifyCmd.data,
   configCmd.data,
+  ticketsCmd.data,
 ];
 
 async function start(): Promise<void> {

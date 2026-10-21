@@ -22,16 +22,16 @@ export async function handleGuildMemberAdd(member: GuildMember | PartialGuildMem
     // Get user's avatar URL (high res)
     const avatarUrl = member.user.displayAvatarURL({ extension: 'png', size: 512 });
 
-    // Generate welcome card
+    // Generate welcome card using separate image message
     const cardBuffer = await welcomeCard.generate({
       avatarUrl,
-      username: member.user.username,
+      displayName: member.user.displayName,
       guildName: member.guild.name,
       memberCount: totalMemberCount,
-      welcomeMessage: welcomeConfig.message,
+      welcomeMessage: welcomeConfig.welcomeImageMessage || welcomeConfig.message,
     });
 
-    // Prepare message content with user mention
+    // Prepare message content with user mention (uses Discord message template)
     const messageContent = welcomeConfig.message
       .replace(/{user}/g, `<@${member.id}>`)
       .replace(/{username}/g, member.user.username)

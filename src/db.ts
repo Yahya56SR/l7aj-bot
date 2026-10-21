@@ -15,32 +15,53 @@ interface UserData {
   voice_minutes: number;
 }
 
+interface TicketData {
+  id: string;
+  channelId: string;
+  panelId: string;
+  creatorId: string;
+  claimedBy?: string;
+  status: 'open' | 'closed' | 'claimed';
+  createdAt: number;
+  closedAt?: number;
+  closedBy?: string;
+  closeReason?: string;
+  formResponses: TicketFormResponse[];
+  lastActivity: number;
+  transcriptUrl?: string;
+}
+
 interface DbMeta {
   totalMembers: number;
+  ticketCounter: number;         // Auto-incrementing ticket number
 }
 
 interface DbData {
   users: { [userId: string]: UserData };
+  tickets: { [ticketId: string]: TicketData };
   meta: DbMeta;
 }
 
-let cache: DbData = { users: {}, meta: { totalMembers: 0 } };
+let cache: DbData = { users: {}, tickets: {}, meta: { totalMembers: 0, ticketCounter: 0 } };
 
 function load(): DbData {
   try {
     if (fs.existsSync(dbPath)) {
       const loaded = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
       // Handle legacy format (direct user object)
-      if (loaded.users) {
+      if (loaded.users && !loaded.tickets) {
+        return { users: loaded.users, tickets: {}, meta: { totalMembers: Object.keys(loaded.users).length, ticketCounter: 0 } };
+      }
+      if (loaded.users && loaded.tickets && loaded.meta) {
         return loaded;
       }
       // Migrate legacy format
-      return { users: loaded, meta: { totalMembers: Object.keys(loaded).length } };
+      return { users: loaded, tickets: {}, meta: { totalMembers: Object.keys(loaded).length, ticketCounter: 0 } };
     }
   } catch (err) {
     console.error('Failed to load database:', err);
   }
-  return { users: {}, meta: { totalMembers: 0 } };
+  return { users: {}, tickets: {}, meta: { totalMembers: 0, ticketCounter: 0 } };
 }
 
 function save(data: DbData): void {
@@ -54,7 +75,7 @@ function save(data: DbData): void {
 
 export function initDb(): void {
   cache = load();
-  console.log(`Database loaded: ${Object.keys(cache.users).length} users, total members tracked: ${cache.meta.totalMembers}`);
+  console.log(`Database loaded: ${Object.keys(cache.users).length} users, ${Object.keys(cache.tickets).length} tickets, total members tracked: ${cache.meta.totalMembers}`);
 }
 
 export interface UserRow {
@@ -63,6 +84,28 @@ export interface UserRow {
   level: number;
   last_msg_ts: number;
   voice_minutes: number;
+}
+
+export interface TicketRow {
+  id: string;
+  channelId: string;
+  panelId: string;
+  creatorId: string;
+  claimedBy?: string;
+  status: 'open' | 'closed' | 'claimed';
+  createdAt: number;
+  closedAt?: number;
+  closedBy?: string;
+  closeReason?: string;
+  formResponses: TicketFormResponse[];
+  lastActivity: number;
+  transcriptUrl?: string;
+}
+
+export interface TicketFormResponse {
+  fieldId: string;
+  label: string;
+  value: string;
 }
 
 export function getUser(userId: string): UserRow | undefined {
@@ -160,4 +203,111 @@ export function initializeTotalMembers(count: number): void {
     cache.meta.totalMembers = count;
     save(cache);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Ticket functions                                                    */
+/* ------------------------------------------------------------------ */
+
+export function getNextTicketNumber(): number {
+  cache.meta.ticketCounter++;
+  save(cache);
+  return cache.meta.ticketCounter;
+}
+
+export function createTicket(ticket: TicketRow): TicketRow {
+  cache.tickets[ticket.id] = ticket;
+  save(cache);
+  return ticket;
+}
+
+export function getTicket(ticketId: string): TicketRow | undefined {
+  return cache.tickets[ticketId];
+}
+
+export function getTicketByChannel(channelId: string): TicketRow | undefined {
+  for (const ticket of Object.values(cache.tickets)) {
+    if (ticket.channelId === channelId) return ticket;
+  }
+  return undefined;
+}
+
+export function getTicketsByCreator(creatorId: string): TicketRow[] {
+  return Object.values(cache.tickets)
+    .filter(t => t.creatorId === creatorId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function getTicketsByPanel(panelId: string): TicketRow[] {
+  return Object.values(cache.tickets)
+    .filter(t => t.panelId === panelId)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function getOpenTickets(): TicketRow[] {
+  return Object.values(cache.tickets)
+    .filter(t => t.status === 'open' || t.status === 'claimed')
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export function updateTicket(ticketId: string, updates: Partial<TicketRow>): TicketRow | undefined {
+  const ticket = cache.tickets[ticketId];
+  if (!ticket) return undefined;
+  cache.tickets[ticketId] = { ...ticket, ...updates };
+  save(cache);
+  return cache.tickets[ticketId];
+}
+
+export function updateTicketActivity(ticketId: string): void {
+  const ticket = cache.tickets[ticketId];
+  if (ticket) {
+    ticket.lastActivity = Date.now();
+    save(cache);
+  }
+}
+
+export function closeTicket(ticketId: string, closedBy: string, reason?: string, transcriptUrl?: string): TicketRow | undefined {
+  const ticket = cache.tickets[ticketId];
+  if (!ticket) return undefined;
+  ticket.status = 'closed';
+  ticket.closedAt = Date.now();
+  ticket.closedBy = closedBy;
+  ticket.closeReason = reason;
+  if (transcriptUrl) ticket.transcriptUrl = transcriptUrl;
+  save(cache);
+  return ticket;
+}
+
+export function claimTicket(ticketId: string, claimedBy: string): TicketRow | undefined {
+  const ticket = cache.tickets[ticketId];
+  if (!ticket) return undefined;
+  if (ticket.status === 'closed') return undefined;
+  ticket.status = 'claimed';
+  ticket.claimedBy = claimedBy;
+  save(cache);
+  return ticket;
+}
+
+export function unclaimTicket(ticketId: string): TicketRow | undefined {
+  const ticket = cache.tickets[ticketId];
+  if (!ticket) return undefined;
+  ticket.status = 'open';
+  ticket.claimedBy = undefined;
+  save(cache);
+  return ticket;
+}
+
+export function deleteTicket(ticketId: string): boolean {
+  if (!cache.tickets[ticketId]) return false;
+  delete cache.tickets[ticketId];
+  save(cache);
+  return true;
+}
+
+export function getAllTickets(): TicketRow[] {
+  return Object.values(cache.tickets).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function getTicketCount(): number {
+  return Object.keys(cache.tickets).length;
 }
