@@ -171,6 +171,8 @@ export interface BotConfig {
     noXpChannels: string[];
     /** When set, XP is only earned in this channel (MEE6 `!xpchannel`) */
     xpChannel: string;
+    /** When true, bots earn no XP in text or voice channels */
+    ignoreBots: boolean;
   };
   channels: {
     levelUp: string;
@@ -218,6 +220,7 @@ const DEFAULT_CONFIG: BotConfig = {
     perVoiceMinuteMax: 8,
     noXpChannels: [],
     xpChannel: '',
+    ignoreBots: true,
   },
   channels: {
     levelUp: '',
@@ -339,6 +342,7 @@ export function loadConfig(): BotConfig {
             parsed.xp?.perVoiceMinuteMax ?? legacyPerVoice ?? DEFAULT_CONFIG.xp.perVoiceMinuteMax,
           noXpChannels: [...(parsed.xp?.noXpChannels || [])],
           xpChannel: parsed.xp?.xpChannel || '',
+          ignoreBots: parsed.xp?.ignoreBots ?? DEFAULT_CONFIG.xp.ignoreBots,
         },
         channels: { ...DEFAULT_CONFIG.channels, ...(parsed.channels || {}) },
         verification: { ...DEFAULT_CONFIG.verification, ...(parsed.verification || {}) },

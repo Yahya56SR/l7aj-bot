@@ -40,6 +40,7 @@ const DEFAULTS = {
     perVoiceMinuteMax: 8,
     noXpChannels: [],
     xpChannel: '',
+    ignoreBots: true,
   },
   channels: {
     levelUp: '',
@@ -85,6 +86,7 @@ function loadExisting() {
             parsed.xp?.perVoiceMinuteMax ?? legacyPerVoice ?? DEFAULTS.xp.perVoiceMinuteMax,
           noXpChannels: [...(parsed.xp?.noXpChannels || [])],
           xpChannel: parsed.xp?.xpChannel || '',
+          ignoreBots: parsed.xp?.ignoreBots ?? DEFAULTS.xp.ignoreBots,
         },
         channels: { ...clone(DEFAULTS.channels), ...(parsed.channels || {}) },
         verification: { ...clone(DEFAULTS.verification), ...(parsed.verification || {}) },
@@ -354,6 +356,9 @@ async function main() {
     await ask('XP per voice minute (max)', String(existing.xp.perVoiceMinuteMax ?? 8)),
     8,
   );
+  const ignoreBotsDefault = existing.xp.ignoreBots ?? true;
+  config.xp.ignoreBots =
+    (await ask(`Ignore bots for XP? (y/n)`, ignoreBotsDefault ? 'y' : 'n')).toLowerCase() === 'y';
 
   /* ------------------------------------------------------------------ */
   /* Channels                                                            */
@@ -383,7 +388,7 @@ async function main() {
   console.log(`  Emoji mappings:   ${Object.keys(config.reactionRoles.mappings).length}`);
   console.log(`  Level roles:      ${Object.keys(config.levelRoles).length}`);
   console.log(
-    `  XP:               ${config.xp.perMessageMin}-${config.xp.perMessageMax}/msg · ${config.xp.perVoiceMinuteMin}-${config.xp.perVoiceMinuteMax}/vc-min · ${config.xp.cooldownSeconds}s cooldown`,
+    `  XP:               ${config.xp.perMessageMin}-${config.xp.perMessageMax}/msg · ${config.xp.perVoiceMinuteMin}-${config.xp.perVoiceMinuteMax}/vc-min · ${config.xp.cooldownSeconds}s cooldown · ignore bots: ${config.xp.ignoreBots ? 'yes' : 'no'}`,
   );
   console.log(`  Level-up channel: ${config.channels.levelUp || '(current channel)'}`);
   console.log(`  Log channel:      ${config.channels.logs || '(none)'}`);

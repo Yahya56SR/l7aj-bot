@@ -71,6 +71,15 @@ export const data = new SlashCommandBuilder()
             'Level-up text. Placeholders: {user} {username} {level} {server} {role} {xp} {xpneeded}',
           )
           .setMaxLength(2000),
+      )
+      .addIntegerOption((o) =>
+        o
+          .setName('ignore_bots')
+          .setDescription('Whether bots earn XP: 1 = ignore bots (no XP), 0 = allow bots to earn XP')
+          .addChoices(
+            { name: 'Yes — bots earn no XP', value: 1 },
+            { name: 'No — bots can earn XP', value: 0 },
+          ),
       ),
   )
   .addSubcommandGroup((group) =>
@@ -143,6 +152,7 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
   const cooldown = interaction.options.getInteger('cooldown_seconds');
   const xpPerVoice = interaction.options.getInteger('xp_per_voice_minute');
   const xpPerVoiceMax = interaction.options.getInteger('xp_per_voice_minute_max');
+  const ignoreBots = interaction.options.getInteger('ignore_bots');
   const logChannel = interaction.options.getChannel('log_channel');
   const announceMessage = interaction.options.getString('announce_message');
 
@@ -153,6 +163,7 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
     cooldown === null &&
     xpPerVoice === null &&
     xpPerVoiceMax === null &&
+    ignoreBots === null &&
     !logChannel &&
     !announceMessage
   ) {
@@ -192,6 +203,12 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
     if (xpPerVoiceMax !== null) {
       cfg.xp.perVoiceMinuteMax = xpPerVoiceMax;
       changes.push(`Max voice XP per minute → **${xpPerVoiceMax}**`);
+    }
+    if (ignoreBots !== null) {
+      cfg.xp.ignoreBots = ignoreBots === 1;
+      changes.push(
+        `Ignore bots for XP → ${cfg.xp.ignoreBots ? 'yes (bots earn no XP)' : 'no (bots can earn XP)'}`,
+      );
     }
     if (logChannel) {
       cfg.channels.logs = logChannel.id;

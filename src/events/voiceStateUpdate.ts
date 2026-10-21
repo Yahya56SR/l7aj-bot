@@ -33,6 +33,10 @@ export function handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceStat
   const userId = newState.member?.user?.id || oldState.member?.user?.id;
   if (!userId) return;
 
+  const cfg = getConfig();
+  // Optionally ignore bots for voice-channel XP
+  if (cfg.xp.ignoreBots && (newState.member?.user?.bot ?? oldState.member?.user?.bot)) return;
+
   const now = Date.now();
 
   // Left a voice channel, or moved to a different one
@@ -56,6 +60,7 @@ export function handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceStat
  */
 export async function handleVoiceTick(client: Client): Promise<void> {
   const now = Date.now();
+  const cfg = getConfig();
 
   // Create a snapshot of entries to avoid modification during iteration
   const sessionEntries: Array<[string, number]> = [];
@@ -72,6 +77,12 @@ export async function handleVoiceTick(client: Client): Promise<void> {
     for (const guild of client.guilds.cache.values()) {
       const member = guild.members.cache.get(userId);
       if (member?.voice.channel) {
+        // Optionally ignore bots for voice-channel XP, but keep tracking the
+        // session so it gets cleaned up when the bot actually leaves VC.
+        if (cfg.xp.ignoreBots && member.user.bot) {
+          found = true;
+          break;
+        }
         awardVoiceXp(userId, minutesElapsed, guild, member.user);
         found = true;
         break;

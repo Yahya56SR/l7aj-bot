@@ -25,11 +25,13 @@ export async function handleMessageCreate(message: Message): Promise<void> {
   }
   if (wasDeleted) return;
 
-  if (message.author.bot) return;
   if (!message.guild) return;
 
   const cfg = getConfig();
   const xpCfg = cfg.xp;
+
+  // Optionally ignore bots for text-channel XP
+  if (xpCfg.ignoreBots && message.author.bot) return;
 
   // MEE6 `!nocxp` — excluded channels never give XP
   if (xpCfg.noXpChannels?.includes(message.channelId)) return;
