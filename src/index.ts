@@ -2,7 +2,7 @@ import { Client, GatewayIntentBits, Partials, Collection } from 'discord.js';
 import { REST } from '@discordjs/rest';
 import dotenv from 'dotenv';
 import { getConfig, loadConfig } from './config';
-import { initDb } from './db';
+import { initDb, initializeTotalMembers } from './db';
 import { registerCommands } from './handlers/registerCommands';
 import { handleButtonInteraction } from './handlers/buttons';
 import * as rankCmd from './commands/rank';
@@ -16,6 +16,7 @@ import * as configCmd from './commands/config';
 import { handleMessageCreate } from './events/messageCreate';
 import { handleVoiceStateUpdate, handleVoiceTick } from './events/voiceStateUpdate';
 import { handleReactionAdd, handleReactionRemove } from './events/messageReaction';
+import { handleGuildMemberAdd, handleGuildMemberRemove } from './events/guildMember';
 
 dotenv.config();
 loadConfig();
@@ -46,6 +47,12 @@ let voiceTickInterval: ReturnType<typeof setInterval> | null = null;
 
 client.on('ready', () => {
   console.log(`Logged in as ${client.user?.tag} (${client.user?.id})`);
+  // Initialize total member count from current guild member count
+  const cfg = getConfig();
+  const guild = client.guilds.cache.get(cfg.guildId);
+  if (guild) {
+    initializeTotalMembers(guild.memberCount);
+  }
   // Award voice XP every minute to users still in VC
   voiceTickInterval = setInterval(async () => {
     try {
@@ -85,6 +92,38 @@ client.on('messageReactionRemove', async (reaction, user) => {
     await handleReactionRemove(reaction, user);
   } catch (err) {
     console.error('Message reaction remove handler error:', err);
+  }
+});
+
+client.on('guildMemberAdd', async (member) => {
+  try {
+    // Ensure we have a full GuildMember (fetch if partial)
+    if (member.partial) {
+      try {
+        await member.fetch();
+      } catch (fetchErr) {
+        console.error('Failed to fetch partial member on join:', fetchErr);
+      }
+    }
+    await handleGuildMemberAdd(member);
+  } catch (err) {
+    console.error('Guild member add handler error:', err);
+  }
+});
+
+client.on('guildMemberRemove', async (member) => {
+  try {
+    // Ensure we have a full GuildMember (fetch if partial)
+    if (member.partial) {
+      try {
+        await member.fetch();
+      } catch (fetchErr) {
+        console.error('Failed to fetch partial member on leave:', fetchErr);
+      }
+    }
+    await handleGuildMemberRemove(member);
+  } catch (err) {
+    console.error('Guild member remove handler error:', err);
   }
 });
 

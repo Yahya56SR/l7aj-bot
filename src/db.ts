@@ -15,21 +15,32 @@ interface UserData {
   voice_minutes: number;
 }
 
-interface DbData {
-  [userId: string]: UserData;
+interface DbMeta {
+  totalMembers: number;
 }
 
-let cache: DbData = {};
+interface DbData {
+  users: { [userId: string]: UserData };
+  meta: DbMeta;
+}
+
+let cache: DbData = { users: {}, meta: { totalMembers: 0 } };
 
 function load(): DbData {
   try {
     if (fs.existsSync(dbPath)) {
-      return JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+      const loaded = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+      // Handle legacy format (direct user object)
+      if (loaded.users) {
+        return loaded;
+      }
+      // Migrate legacy format
+      return { users: loaded, meta: { totalMembers: Object.keys(loaded).length } };
     }
   } catch (err) {
     console.error('Failed to load database:', err);
   }
-  return {};
+  return { users: {}, meta: { totalMembers: 0 } };
 }
 
 function save(data: DbData): void {
@@ -43,7 +54,7 @@ function save(data: DbData): void {
 
 export function initDb(): void {
   cache = load();
-  console.log(`Database loaded: ${Object.keys(cache).length} users`);
+  console.log(`Database loaded: ${Object.keys(cache.users).length} users, total members tracked: ${cache.meta.totalMembers}`);
 }
 
 export interface UserRow {
@@ -55,14 +66,14 @@ export interface UserRow {
 }
 
 export function getUser(userId: string): UserRow | undefined {
-  const u = cache[userId];
+  const u = cache.users[userId];
   if (!u) return undefined;
   return { user_id: userId, ...u } as UserRow;
 }
 
 export function ensureUser(userId: string): UserRow {
-  if (!cache[userId]) {
-    cache[userId] = { xp: 0, level: 0, last_msg_ts: 0, voice_minutes: 0 };
+  if (!cache.users[userId]) {
+    cache.users[userId] = { xp: 0, level: 0, last_msg_ts: 0, voice_minutes: 0 };
     save(cache);
   }
   return getUser(userId)!;
@@ -78,7 +89,7 @@ export function addXp(userId: string, amount: number, source: string): {
   const newXp = user.xp + amount;
   const newLevel = levelFromXp(newXp).level;
 
-  cache[userId] = {
+  cache.users[userId] = {
     xp: newXp,
     level: newLevel,
     last_msg_ts: user.last_msg_ts,
@@ -91,13 +102,13 @@ export function addXp(userId: string, amount: number, source: string): {
 
 export function setVoiceMinutes(userId: string, minutes: number): void {
   ensureUser(userId);
-  const u = cache[userId];
-  cache[userId] = { ...u, voice_minutes: minutes };
+  const u = cache.users[userId];
+  cache.users[userId] = { ...u, voice_minutes: minutes };
   save(cache);
 }
 
 export function getLeaderboard(limit: number = 10): UserRow[] {
-  return Object.entries(cache)
+  return Object.entries(cache.users)
     .map(([user_id, u]) => ({ user_id, ...u }) as UserRow)
     .sort((a, b) => b.xp - a.xp)
     .slice(0, limit);
@@ -111,7 +122,7 @@ export function getRankPosition(userId: string): number {
   if (!user) return 0;
 
   let position = 1;
-  for (const [id, u] of Object.entries(cache)) {
+  for (const [id, u] of Object.entries(cache.users)) {
     if (id !== userId && u.xp > user.xp) position++;
   }
   return position;
@@ -121,5 +132,32 @@ export function getRankPosition(userId: string): number {
  * How many members have an XP record (i.e. are ranked).
  */
 export function countRanked(): number {
-  return Object.keys(cache).length;
+  return Object.keys(cache.users).length;
+}
+
+/**
+ * Get the total member count (includes members who left/kicked/banned).
+ * This increments the counter and returns the new value.
+ */
+export function incrementTotalMembers(): number {
+  cache.meta.totalMembers++;
+  save(cache);
+  return cache.meta.totalMembers;
+}
+
+/**
+ * Get the current total member count without incrementing.
+ */
+export function getTotalMemberCount(): number {
+  return cache.meta.totalMembers;
+}
+
+/**
+ * Initialize total member count from current guild member count (for migration).
+ */
+export function initializeTotalMembers(count: number): void {
+  if (cache.meta.totalMembers === 0) {
+    cache.meta.totalMembers = count;
+    save(cache);
+  }
 }

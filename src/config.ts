@@ -51,6 +51,26 @@ export interface AutoReactionChannel {
   emojis: string[];
 }
 
+export interface WelcomeConfig {
+  /** Channel to send welcome messages */
+  channelId: string;
+  /** Custom welcome message template. Placeholders: {user} {username} {server} {memberCount} */
+  message: string;
+  /** Background image path (relative to project root) */
+  backgroundImage: string;
+  /** Whether to send welcome card as image */
+  enabled: boolean;
+}
+
+export interface GoodbyeConfig {
+  /** Channel to send goodbye messages */
+  channelId: string;
+  /** Custom goodbye message template. Placeholders: {user} {username} {server} {memberCount} */
+  message: string;
+  /** Whether goodbye messages are enabled */
+  enabled: boolean;
+}
+
 export interface BotConfig {
   token: string;
   clientId: string;
@@ -102,6 +122,10 @@ export interface BotConfig {
   automod: AutomodConfig;
   /** Auto-reaction configuration: react to every message in specific channels with configured emojis */
   autoReactions: AutoReactionChannel[];
+  /** Welcome message configuration */
+  welcome: WelcomeConfig;
+  /** Goodbye message configuration */
+  goodbye: GoodbyeConfig;
 }
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -147,6 +171,17 @@ const DEFAULT_CONFIG: BotConfig = {
     attachmentOnlyChannels: [],
   },
   autoReactions: [],
+  welcome: {
+    channelId: '',
+    message: 'Welcome {user} to {server}! 🎉',
+    backgroundImage: 'assets/bg.jpg',
+    enabled: false,
+  },
+  goodbye: {
+    channelId: '',
+    message: 'Goodbye {username}, we\'ll miss you! 👋',
+    enabled: false,
+  },
 };
 
 const configPath = path.join(__dirname, '..', 'config.json');
@@ -228,6 +263,8 @@ export function loadConfig(): BotConfig {
         verification: { ...DEFAULT_CONFIG.verification, ...(parsed.verification || {}) },
         automod: { ...DEFAULT_CONFIG.automod, ...(parsed.automod || {}) },
         autoReactions: Array.isArray(parsed.autoReactions) ? parsed.autoReactions : [],
+        welcome: { ...DEFAULT_CONFIG.welcome, ...(parsed.welcome || {}) },
+        goodbye: { ...DEFAULT_CONFIG.goodbye, ...(parsed.goodbye || {}) },
       };
     }
   } catch (err) {
