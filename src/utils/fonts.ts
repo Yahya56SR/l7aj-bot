@@ -32,9 +32,33 @@ const BUNDLED: Array<[string, string]> = [
   ['NotoSansDevanagari-Regular.ttf', 'AtlasDevanagari'],
   ['NotoSansBengali-Regular.ttf', 'AtlasBengali'],
   ['NotoSansTamil-Regular.ttf', 'AtlasTamil'],
+  ['NotoSansJP-Regular.ttf', 'AtlasJP'],
+  ['NotoSansKR-Regular.ttf', 'AtlasKR'],
+  ['NotoSansSC-Regular.ttf', 'AtlasSC'],
+  ['NotoSansMath-Regular.ttf', 'AtlasMath'],
+  ['NotoSansEgyptianHieroglyphs-Regular.ttf', 'AtlasHieroglyphs'],
   // NOTE: the 25MB color-emoji TTF is NOT committed — it is downloaded once
   // to data/fonts on hosts that have no system emoji font (see below).
 ];
+
+/**
+ * Download URLs for bundled Noto fonts not committed to the repo.
+ * Lands in data/fonts (persistent, outside git) so deploys stay small and
+ * hosts self-heal missing glyph coverage without a redeploy. Only downloaded
+ * when the file is missing from assets/fonts.
+ */
+const FONT_DOWNLOAD_URLS: Record<string, string> = {
+  'NotoSansJP-Regular.ttf':
+    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosansjp/NotoSansJP-Regular.ttf',
+  'NotoSansKR-Regular.ttf':
+    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskr/NotoSansKR-Regular.ttf',
+  'NotoSansSC-Regular.ttf':
+    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanssc/NotoSansSC-Regular.ttf',
+  'NotoSansMath-Regular.ttf':
+    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosansmath/NotoSansMath-Regular.ttf',
+  'NotoSansEgyptianHieroglyphs-Regular.ttf':
+    'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosans-egyptianhieroglyphs/NotoSansEgyptianHieroglyphs-Regular.ttf',
+};
 
 /**
  * Host fonts worth picking up when present. Arial aliases keep the classic
@@ -65,6 +89,7 @@ export const FONT_STACK = [
   'AtlasSans', 'AtlasSansExt', 'AtlasGreek', 'AtlasCyrillic', 'AtlasVietnamese',
   'AtlasArabic', 'AtlasHebrew', 'AtlasThai',
   'AtlasDevanagari', 'AtlasBengali', 'AtlasTamil',
+  'AtlasJP', 'AtlasKR', 'AtlasSC', 'AtlasMath', 'AtlasHieroglyphs',
   'Tahoma', 'Yu Gothic', 'Malgun Gothic', 'Microsoft YaHei', 'DejaVu Sans',
   'Segoe UI Emoji', 'AtlasEmoji', 'Noto Color Emoji', 'Segoe UI Symbol',
 ].map((f) => (/\s/.test(f) ? `"${f}"` : f)).join(', ');
@@ -75,11 +100,16 @@ export function ensureFonts(): void {
   ready = true;
   const missing: string[] = [];
 
+  const downloading = new Set<string>();
+
   for (const [file, alias] of [...BUNDLED, ...SYSTEM]) {
     const full = file.startsWith('/') || /^[A-Za-z]:/.test(file) ? file : path.join(FONTS_DIR, file);
     try {
       if (!fs.existsSync(full)) {
-        if (!file.startsWith('/') && !/^[A-Za-z]:/.test(file)) missing.push(file);
+        if (file.startsWith('/') || /^[A-Za-z]:/.test(file)) continue; // system font not present — skip
+        // Download to the persistent data dir instead of committing the binary to git.
+        void downloadFont(file, alias, downloading);
+        missing.push(file);
         continue;
       }
       GlobalFonts.registerFromPath(full, alias);
@@ -90,7 +120,7 @@ export function ensureFonts(): void {
   }
 
   if (missing.length) {
-    console.warn(`[Fonts] Missing bundled fonts: ${missing.join(', ')} — those scripts may render as boxes.`);
+    console.info(`[Fonts] Queued download for missing fonts: ${missing.join(', ')} — they land in data/fonts on first start.`);
   }
 
   // A manually restored bundle copy still wins if present.
@@ -163,6 +193,47 @@ async function ensureEmojiFont(): Promise<void> {
     }
   }
   console.warn('[Fonts] No color emoji available — emoji may render as boxes until the download succeeds.');
+}
+
+/**
+ * Download a single bundled Noto font to the persistent data dir and register
+ * it. Never throws — worst case the alias stays unregistered and that script
+ * falls back to the rest of FONT_STACK. Deduplicated via `downloading` so the
+ * same font isn't fetched twice in one boot.
+ */
+async function downloadFont(
+  file: string,
+  alias: string,
+  downloading: Set<string>,
+): Promise<void> {
+  if (downloading.has(file)) return;
+  const url = FONT_DOWNLOAD_URLS[file];
+  if (!url) {
+    console.warn(`[Fonts] No download URL for ${file} — glyph coverage may be incomplete.`);
+    return;
+  }
+  downloading.add(file);
+
+  const dest = path.join(DATA_FONTS_DIR, file);
+  try {
+    fs.mkdirSync(DATA_FONTS_DIR, { recursive: true });
+    console.log(`[Fonts] Downloading ${file} via ${new URL(url).host}...`);
+    const res = await fetch(url);
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+    const tmp = `${dest}.part`;
+    await pipeline(Readable.fromWeb(res.body as any), fs.createWriteStream(tmp));
+    fs.renameSync(tmp, dest);
+    GlobalFonts.registerFromPath(dest, alias);
+    registeredAliases.add(alias);
+    console.log(`[Fonts] ${file} ready (downloaded to data/fonts).`);
+  } catch (error) {
+    console.error(
+      `[Fonts] Failed to download ${file}:`,
+      (error as Error)?.message || error,
+    );
+  } finally {
+    downloading.delete(file);
+  }
 }
 
 /**
