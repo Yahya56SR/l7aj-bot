@@ -562,13 +562,15 @@ async function handleAutomodAiConfig(interaction: ChatInputCommandInteraction): 
         return;
       }
       const moderator = new GeminiLiveModerator(apiKey, ai.model);
-      const verdict = await moderator.moderate(text);
+      // Use a short timeout so Discord doesn't expire the interaction (~3s limit).
+      await interaction.deferReply({ ephemeral: true });
+      const verdict = await moderator.moderate(text, 3000);
       moderator.close();
       if (!verdict) {
-        await interaction.reply({ content: '⚠️ AI moderation returned no verdict (fail open — message would be allowed).', ephemeral: true });
+        await interaction.editReply({ content: '⚠️ AI moderation returned no verdict (fail open — message would be allowed).' });
         return;
       }
-      await interaction.reply({
+      await interaction.editReply({
         content:
           `**AI moderation test (dry run)**\n` +
           `Flagged: ${verdict.flagged ? '✅ YES' : '❌ no'}\n` +
@@ -576,7 +578,6 @@ async function handleAutomodAiConfig(interaction: ChatInputCommandInteraction): 
           `Confidence: ${(verdict.confidence * 100).toFixed(0)}%\n` +
           `Reason: ${verdict.reason}\n` +
           `(No message was deleted.)`,
-        ephemeral: true,
       });
       break;
     }

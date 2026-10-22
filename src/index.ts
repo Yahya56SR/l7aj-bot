@@ -19,6 +19,7 @@ import { handleMessageCreate } from './events/messageCreate';
 import { handleVoiceStateUpdate, handleVoiceTick } from './events/voiceStateUpdate';
 import { handleReactionAdd, handleReactionRemove } from './events/messageReaction';
 import { handleGuildMemberAdd, handleGuildMemberRemove } from './events/guildMember';
+import { registerLoggingEvents } from './events/logging';
 
 dotenv.config();
 loadConfig();
@@ -45,6 +46,9 @@ client.commands.set(xpCmd.data.name, xpCmd);
 client.commands.set(verifyCmd.data.name, verifyCmd);
 client.commands.set(configCmd.data.name, configCmd);
 client.commands.set(ticketsCmd.data.name, ticketsCmd);
+
+// Register server logging event listeners (roles, members, channels, messages)
+registerLoggingEvents(client);
 
 let voiceTickInterval: ReturnType<typeof setInterval> | null = null;
 

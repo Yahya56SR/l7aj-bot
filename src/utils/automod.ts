@@ -122,12 +122,27 @@ async function runAiModeration(message: Message): Promise<boolean> {
   const cfg = getConfig();
   const ai = cfg.automod.aiModeration;
 
-  if (!ai.enabled) return false;
-  if (!message.content || message.content.length < ai.minLength) return false;
+  console.debug('[Automod:AI] Checking message', {
+    messageId: message.id,
+    authorId: message.author.id,
+    channelId: message.channelId,
+    contentLength: message.content?.length ?? 0,
+    enabled: ai.enabled,
+    minLength: ai.minLength,
+  });
+
+  if (!ai.enabled) {
+    console.debug('[Automod:AI] Skipped — AI moderation is disabled.');
+    return false;
+  }
+  if (!message.content || message.content.length < ai.minLength) {
+    console.debug('[Automod:AI] Skipped — message too short or empty.');
+    return false;
+  }
 
   const apiKey = process.env.GEMINI_API_KEY || ai.apiKey;
   if (!apiKey) {
-    console.warn('[Automod] AI moderation is enabled but no GEMINI_API_KEY is configured.');
+    console.warn('[Automod:AI] AI moderation is enabled but no GEMINI_API_KEY is configured.');
     return false;
   }
 
@@ -137,12 +152,26 @@ async function runAiModeration(message: Message): Promise<boolean> {
   try {
     verdict = await moderator.moderate(message.content);
   } catch (err) {
-    console.error('[Automod] AI moderation threw:', err);
+    console.error('[Automod:AI] Moderation threw:', err);
     return false;
   }
 
-  if (!verdict || !verdict.flagged) return false;
-  if (verdict.confidence < ai.confidenceThreshold) return false;
+  console.debug('[Automod:AI] Verdict received', {
+    messageId: message.id,
+    flagged: verdict?.flagged ?? null,
+    category: verdict?.category ?? null,
+    confidence: verdict?.confidence ?? null,
+    threshold: ai.confidenceThreshold,
+  });
+
+  if (!verdict || !verdict.flagged) {
+    console.debug('[Automod:AI] Not flagged — allowing message.');
+    return false;
+  }
+  if (verdict.confidence < ai.confidenceThreshold) {
+    console.debug('[Automod:AI] Confidence below threshold — allowing message.');
+    return false;
+  }
 
   // Block the message, matching the behaviour of the regex checks.
   try {
@@ -150,6 +179,11 @@ async function runAiModeration(message: Message): Promise<boolean> {
   } catch {
     // Ignore delete errors (missing permissions, already deleted, etc.)
   }
+  console.debug('[Automod:AI] Message deleted — sending warning + mod-log.', {
+    messageId: message.id,
+    category: verdict.category,
+    confidence: verdict.confidence,
+  });
   await sendDmWarning(
     message,
     `❌ Your message was removed by automated moderation (**${verdict.category}**): ${verdict.reason}`,

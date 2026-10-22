@@ -27,6 +27,7 @@ interface QueuedItem {
   text: string;
   resolve: Resolve;
   timer: ReturnType<typeof setTimeout> | null;
+  timeoutMs: number;
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -93,6 +94,17 @@ export class GeminiLiveModerator {
     }
 
     this.connecting = true;
+    console.debug('[Gemini Live] Establishing session', { model: this.model });
+
+    const CONNECT_TIMEOUT_MS = 8000;
+    const connectTimeout = setTimeout(() => {
+      if (this.connecting && !this.connected) {
+        this.connecting = false;
+        this.session = null;
+        console.warn('[Gemini Live] Connection timeout after', CONNECT_TIMEOUT_MS, 'ms');
+      }
+    }, CONNECT_TIMEOUT_MS);
+
     try {
       this.session = await this.ai.live.connect({
         model: this.model,
@@ -106,9 +118,11 @@ export class GeminiLiveModerator {
         },
         callbacks: {
           onopen: () => {
+            clearTimeout(connectTimeout);
             this.connected = true;
             this.connecting = false;
             this.reconnectAttempts = 0;
+            console.debug('[Gemini Live] Session connected and ready.');
           },
           onmessage: (message) => this.handleServerMessage(message),
           onclose: () => this.handleClose(),
@@ -119,9 +133,11 @@ export class GeminiLiveModerator {
         },
       });
     } catch (err) {
+      clearTimeout(connectTimeout);
       this.connecting = false;
       this.connected = false;
       this.session = null;
+      console.error('[Gemini Live] Failed to establish session:', err);
       throw err;
     }
   }
@@ -230,7 +246,7 @@ export class GeminiLiveModerator {
       this.failPending(item, null);
       this.processing = false;
       this.processQueue();
-    }, REQUEST_TIMEOUT_MS);
+    }, item.timeoutMs);
     item.timer = timer;
 
     this.ensureSession()
@@ -248,7 +264,7 @@ export class GeminiLiveModerator {
           this.failPending(item, null);
           this.processing = false;
           this.processQueue();
-        }, REQUEST_TIMEOUT_MS);
+        }, item.timeoutMs);
 
         this.session.sendClientContent({
           turns: [{ role: 'user', parts: [{ text: item.text }] }],
@@ -265,12 +281,21 @@ export class GeminiLiveModerator {
 
   /**
    * Send a message for moderation. Returns a verdict or null (fail open).
+   * @param timeoutMs - Override the default request timeout (useful for
+   *   interactive slash commands where Discord expects a reply within ~3s).
    */
-  moderate(text: string): Promise<AiVerdict | null> {
+  moderate(text: string, timeoutMs?: number): Promise<AiVerdict | null> {
     if (!text) return Promise.resolve(null);
 
+    console.debug('[Gemini Live] Queued message for moderation', {
+      queuedLength: this.queue.length + 1,
+      processing: this.processing,
+      connected: this.connected,
+    });
+
     return new Promise((resolve) => {
-      this.queue.push({ text, resolve, timer: null });
+      const effectiveTimeout = timeoutMs ?? REQUEST_TIMEOUT_MS;
+      this.queue.push({ text, resolve, timer: null, timeoutMs: effectiveTimeout });
       this.processQueue();
     });
   }
@@ -278,6 +303,7 @@ export class GeminiLiveModerator {
   private handleClose() {
     this.connected = false;
     this.session = null;
+    console.debug('[Gemini Live] Session closed, scheduling reconnect.');
     this.scheduleReconnect();
   }
 
