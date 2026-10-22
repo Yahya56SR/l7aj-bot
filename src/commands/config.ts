@@ -6,6 +6,7 @@ import {
   ChannelType,
 } from 'discord.js';
 import { getConfig, updateConfig } from '../config';
+import { GeminiLiveModerator } from '../utils/gemini-live';
 
 export const data = new SlashCommandBuilder()
   .setName('config')
@@ -98,6 +99,57 @@ export const data = new SlashCommandBuilder()
           )
           .addChannelOption((opt) =>
             opt.setName('channel').setDescription('Channel to add/remove').setRequired(true).addChannelTypes(ChannelType.GuildText),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('ai')
+          .setDescription('Configure AI-powered moderation (Groq)')
+          .addStringOption((opt) =>
+            opt
+              .setName('action')
+              .setDescription('Action to perform')
+              .setRequired(true)
+              .addChoices(
+                { name: 'Toggle', value: 'toggle' },
+                { name: 'Set model', value: 'set-model' },
+                { name: 'Set prompt', value: 'set-prompt' },
+                { name: 'Set threshold', value: 'set-threshold' },
+                { name: 'Test (dry run)', value: 'test' },
+              ),
+          )
+          .addBooleanOption((opt) =>
+            opt.setName('enabled').setDescription('Enable or disable AI moderation (for toggle)'),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName('model')
+              .setDescription('Groq model id (for set-model)')
+          )
+          .addStringOption((opt) =>
+            opt.setName('prompt').setDescription('Custom system prompt (for set-prompt)')
+          )
+          .addNumberOption((opt) =>
+            opt
+              .setName('threshold')
+              .setDescription('Confidence threshold 0-1 (for set-threshold)')
+              .setMinValue(0)
+              .setMaxValue(1),
+          )
+          .addStringOption((opt) =>
+            opt.setName('text').setDescription('Text to classify without deleting (for test)'),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('modlogs')
+          .setDescription('Set the channel where automod actions are logged')
+          .addChannelOption((opt) =>
+            opt
+              .setName('channel')
+              .setDescription('Channel where automod actions are logged')
+              .setRequired(true)
+              .addChannelTypes(ChannelType.GuildText),
           ),
       ),
   )
@@ -441,6 +493,93 @@ async function handleAutomodConfig(interaction: ChatInputCommandInteraction, sub
       await interaction.reply({ content: `✅ Channel ${channel} ${action === 'add' ? 'added to' : 'removed from'} attachment-only channels.`, ephemeral: true });
       break;
     }
+    case 'modlogs': {
+      const channel = interaction.options.getChannel('channel', true);
+      updateConfig((c) => {
+        c.automod.modLogsChannelId = channel.id;
+      });
+      await interaction.reply({ content: `✅ Mod-logs channel set to ${channel}.`, ephemeral: true });
+      break;
+    }
+    case 'ai': {
+      await handleAutomodAiConfig(interaction);
+      break;
+    }
+  }
+}
+
+async function handleAutomodAiConfig(interaction: ChatInputCommandInteraction): Promise<void> {
+  const action = interaction.options.getString('action', true);
+
+  switch (action) {
+    case 'toggle': {
+      const enabled = interaction.options.getBoolean('enabled', true);
+      updateConfig((c) => {
+        c.automod.aiModeration.enabled = enabled;
+      });
+      await interaction.reply({ content: `✅ AI moderation ${enabled ? 'enabled' : 'disabled'}.`, ephemeral: true });
+      break;
+    }
+    case 'set-model': {
+      const model = interaction.options.getString('model', true);
+      updateConfig((c) => {
+        c.automod.aiModeration.model = model;
+      });
+      await interaction.reply({ content: `✅ AI moderation model set to \`${model}\`.`, ephemeral: true });
+      break;
+    }
+    case 'set-prompt': {
+      const prompt = interaction.options.getString('prompt', true);
+      updateConfig((c) => {
+        c.automod.aiModeration.systemPrompt = prompt;
+      });
+      await interaction.reply({ content: '✅ AI moderation system prompt updated.', ephemeral: true });
+      break;
+    }
+    case 'set-threshold': {
+      const threshold = interaction.options.getNumber('threshold', true);
+      updateConfig((c) => {
+        c.automod.aiModeration.confidenceThreshold = threshold;
+      });
+      await interaction.reply({ content: `✅ AI moderation confidence threshold set to \`${threshold}\`.`, ephemeral: true });
+      break;
+    }
+    case 'test': {
+      const text = interaction.options.getString('text');
+      if (!text) {
+        await interaction.reply({ content: '❌ Please provide text to test.', ephemeral: true });
+        return;
+      }
+      const cfg = getConfig();
+      const ai = cfg.automod.aiModeration;
+      const apiKey = process.env.GEMINI_API_KEY || ai.apiKey;
+      if (!ai.enabled) {
+        await interaction.reply({ content: '❌ AI moderation is not enabled.', ephemeral: true });
+        return;
+      }
+      if (!apiKey) {
+        await interaction.reply({ content: '❌ No GEMINI_API_KEY configured.', ephemeral: true });
+        return;
+      }
+      const moderator = new GeminiLiveModerator(apiKey, ai.model);
+      const verdict = await moderator.moderate(text);
+      moderator.close();
+      if (!verdict) {
+        await interaction.reply({ content: '⚠️ AI moderation returned no verdict (fail open — message would be allowed).', ephemeral: true });
+        return;
+      }
+      await interaction.reply({
+        content:
+          `**AI moderation test (dry run)**\n` +
+          `Flagged: ${verdict.flagged ? '✅ YES' : '❌ no'}\n` +
+          `Category: ${verdict.category}\n` +
+          `Confidence: ${(verdict.confidence * 100).toFixed(0)}%\n` +
+          `Reason: ${verdict.reason}\n` +
+          `(No message was deleted.)`,
+        ephemeral: true,
+      });
+      break;
+    }
   }
 }
 
@@ -455,6 +594,8 @@ function formatAutomod(auto: any): string {
     `**Ignored channels:** ${auto.ignoredChannels?.length ? auto.ignoredChannels.map((id: string) => `<#${id}>`).join(', ') : '(none)'}`,
     `**Bypass roles:** ${auto.bypassRoles?.length ? auto.bypassRoles.map((id: string) => `<@&${id}>`).join(', ') : '(none)'}`,
     `**Attachment-only channels:** ${auto.attachmentOnlyChannels?.length ? auto.attachmentOnlyChannels.map((id: string) => `<#${id}>`).join(', ') : '(none)'}`,
+    `**Mod-logs channel:** ${auto.modLogsChannelId ? `<#${auto.modLogsChannelId}>` : '(none)'}`,
+    `**AI moderation:** ${auto.aiModeration?.enabled ? '✅ enabled' : '❌ disabled'} · \`${auto.aiModeration?.model || 'n/a'}\``,
   ].join('\n');
 }
 

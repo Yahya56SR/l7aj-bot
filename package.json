@@ -4,14 +4,13 @@
   "description": "Discord bot for TALABA <3 - reaction roles, button roles, XP system, role gifting, verification",
   "main": "src/index.ts",
   "scripts": {
-    "setup": "node scripts/setup.js",
-    "doctor": "node scripts/doctor.js",
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "build": "tsc",
     "serve": "node dist/index.js"
   },
   "dependencies": {
+    "@google/genai": "^2.30.0",
     "@napi-rs/canvas": "^1.0.12",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",

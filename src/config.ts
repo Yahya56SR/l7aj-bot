@@ -23,6 +23,23 @@ export interface RolePanel {
   overrideRoles?: boolean;
 }
 
+export interface AiModerationConfig {
+  /** Whether LLM-based moderation is enabled */
+  enabled: boolean;
+  /** Groq model id */
+  model: string;
+  /** Groq API key (prefer GROQ_API_KEY env var; this is a fallback) */
+  apiKey: string;
+  /** Custom system prompt that fine-tunes the model for Arabizi & Darija */
+  systemPrompt: string;
+  /** Categories the model may flag */
+  categories: string[];
+  /** Minimum message length before calling the model */
+  minLength: number;
+  /** Minimum confidence (0-1) required to block a message */
+  confidenceThreshold: number;
+}
+
 export interface AutomodConfig {
   /** Block all URLs for everyone */
   blockUrls: boolean;
@@ -42,6 +59,10 @@ export interface AutomodConfig {
   bypassRoles: string[];
   /** Channels where messages must have attachments */
   attachmentOnlyChannels: string[];
+  /** Channel where automod actions are logged (empty = no mod logs) */
+  modLogsChannelId: string;
+  /** LLM-based moderation (Groq) */
+  aiModeration: AiModerationConfig;
 }
 
 export interface AutoReactionChannel {
@@ -245,6 +266,36 @@ const DEFAULT_CONFIG: BotConfig = {
     ignoredChannels: [],
     bypassRoles: [],
     attachmentOnlyChannels: [],
+    modLogsChannelId: '',
+    aiModeration: {
+      enabled: false,
+      model: 'gemini-2.5-flash-live',
+      apiKey: '',
+      systemPrompt:
+        'You are a Discord content moderator for a Moroccan community. You read messages in Arabic script, ' +
+        'Arabizi (Latin-script Arabic using digits 3=ع, 7=ح, 5=خ), French, and Moroccan Darija ' +
+        '(Arabic–French code-switching). Darija is a real dialect — not broken Arabic — and French code-switching is normal.\n\n' +
+        'POLICY — Flag ONLY genuine violations:\n' +
+        '- Direct targeted harassment/insults AT a person (e.g. "nta 7mar", "weld l97ba", "zbel", "sir t9awed" said TO someone)\n' +
+        '- Credible threats of violence ("ghadi n9tlek", "n9tlek daba", "ndrbek", "n7re9 lik dar")\n' +
+        '- Hate or identity-based exclusion (race, ethnicity, gender, religion, region)\n' +
+        '- Calls to remove, kick, or purge an ethnic/racial group from a server or place\n' +
+        '- Doxxing / doxxing threats, coordinated harassment, encouragement of self-harm\n\n' +
+        'DO NOT FLAG:\n' +
+        '- Positive gaming slang: "m9awed" can mean awesome/insane-good ("Nta m9awed f PvP", "Dak l-clutch m9awed")\n' +
+        '- Frustration aimed at objects/lag/apps, not people ("Zbel had lag", an app crashing)\n' +
+        '- Sports banter / criticism of team performance\n' +
+        '- Greetings, help requests, criticism of products/government/ideas\n' +
+        '- Quoted abuse in a report context, consensual banter among friends, fictional/game dialogue\n' +
+        '- Single ambiguous words without a target ("7mar.", "Sir t9awed." alone)\n\n' +
+        'SELF-HARM: language like "n2di rassi", "kayji f bali n2di", suicidal ideation → flag (support workflow).\n\n' +
+        'Reply with JSON only: {"flagged": boolean, "category": string, "reason": string, "confidence": number 0-1}. ' +
+        'category must be one of: insult, hate, harassment, threat, spam, sexual, or "none". reason in English. ' +
+        'Be decisive: when confident a rule is violated set flagged=true; when benign or ambiguous-without-target, set flagged=false.',
+      categories: ['insult', 'hate', 'harassment', 'threat', 'spam', 'sexual'],
+      minLength: 8,
+      confidenceThreshold: 0.7,
+    },
   },
   autoReactions: [],
   welcome: {
@@ -346,7 +397,14 @@ export function loadConfig(): BotConfig {
         },
         channels: { ...DEFAULT_CONFIG.channels, ...(parsed.channels || {}) },
         verification: { ...DEFAULT_CONFIG.verification, ...(parsed.verification || {}) },
-        automod: { ...DEFAULT_CONFIG.automod, ...(parsed.automod || {}) },
+        automod: {
+          ...DEFAULT_CONFIG.automod,
+          ...(parsed.automod || {}),
+          aiModeration: {
+            ...DEFAULT_CONFIG.automod.aiModeration,
+            ...(parsed.automod?.aiModeration || {}),
+          },
+        },
         autoReactions: Array.isArray(parsed.autoReactions) ? parsed.autoReactions : [],
         welcome: { ...DEFAULT_CONFIG.welcome, ...(parsed.welcome || {}) },
         goodbye: { ...DEFAULT_CONFIG.goodbye, ...(parsed.goodbye || {}) },

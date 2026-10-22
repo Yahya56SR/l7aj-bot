@@ -1,5 +1,15 @@
-import { Message, TextChannel, ThreadChannel } from 'discord.js';
+import { Message, TextChannel, ThreadChannel, EmbedBuilder } from 'discord.js';
 import { getConfig } from '../config';
+import { GeminiLiveModerator, AiVerdict } from './gemini-live';
+
+let geminiModerator: GeminiLiveModerator | null = null;
+
+function getGeminiModerator(apiKey: string, model: string): GeminiLiveModerator {
+  if (!geminiModerator) {
+    geminiModerator = new GeminiLiveModerator(apiKey, model);
+  }
+  return geminiModerator;
+}
 
 /** Regex to match URLs */
 const URL_REGEX = /https?:\/\/[^\s]+/gi;
@@ -60,17 +70,92 @@ function hasAttachments(message: Message): boolean {
   return message.attachments.size > 0;
 }
 
-/** Send a temporary warning message */
-async function sendWarning(message: Message, content: string): Promise<void> {
-  if (!message.guild) return;
-  const channel = message.channel;
-  if (!channel.isTextBased() || channel.isDMBased()) return;
+/** Truncate a string to a max length, appending an ellipsis when cut. */
+function truncate(str: string, max: number): string {
+  if (str.length <= max) return str;
+  return str.slice(0, max - 1).trimEnd() + '…';
+}
+
+/** Send the warning to the offender via DM instead of in-channel. */
+async function sendDmWarning(message: Message, content: string): Promise<void> {
   try {
-    const sent = await channel.send({ content, allowedMentions: { users: [] } });
-    setTimeout(() => sent.delete().catch(() => undefined), 5000);
+    await message.author.send(content);
   } catch {
-    // Ignore send errors (missing permissions, etc.)
+    // Ignore (DMs closed, user blocked the bot, etc.)
   }
+}
+
+/** Log the automod action to the configured mod-logs channel. */
+async function logToModChannel(message: Message, category: string, reason: string): Promise<void> {
+  const cfg = getConfig();
+  const channelId = cfg.automod.modLogsChannelId;
+  if (!channelId || !message.guild) return;
+  const channel = message.guild.channels.cache.get(channelId);
+  if (!channel || !channel.isTextBased() || channel.isDMBased()) return;
+
+  const embed = new EmbedBuilder()
+    .setColor(0xff9900)
+    .setTitle('🚨 Automod action')
+    .addFields(
+      { name: 'User', value: `<@${message.author.id}> (${message.author.id})`, inline: true },
+      { name: 'Channel', value: `<#${message.channelId}>`, inline: true },
+      { name: 'Category', value: category, inline: true },
+      { name: 'Reason', value: reason },
+      { name: 'Message', value: message.content ? truncate(message.content, 1000) : '*no text*' },
+    )
+    .setTimestamp();
+
+  try {
+    await channel.send({ embeds: [embed] });
+  } catch {
+    // Ignore mod-log send errors (missing permissions, etc.)
+  }
+}
+
+/**
+ * Run the LLM-based moderation check on a message using Groq.
+ * Returns true if the message was deleted (blocked), false otherwise.
+ * Fails open: if the model is unreachable or returns invalid output, the
+ * message is allowed through.
+ */
+async function runAiModeration(message: Message): Promise<boolean> {
+  const cfg = getConfig();
+  const ai = cfg.automod.aiModeration;
+
+  if (!ai.enabled) return false;
+  if (!message.content || message.content.length < ai.minLength) return false;
+
+  const apiKey = process.env.GEMINI_API_KEY || ai.apiKey;
+  if (!apiKey) {
+    console.warn('[Automod] AI moderation is enabled but no GEMINI_API_KEY is configured.');
+    return false;
+  }
+
+  const moderator = getGeminiModerator(apiKey, ai.model);
+
+  let verdict: AiVerdict | null;
+  try {
+    verdict = await moderator.moderate(message.content);
+  } catch (err) {
+    console.error('[Automod] AI moderation threw:', err);
+    return false;
+  }
+
+  if (!verdict || !verdict.flagged) return false;
+  if (verdict.confidence < ai.confidenceThreshold) return false;
+
+  // Block the message, matching the behaviour of the regex checks.
+  try {
+    await message.delete();
+  } catch {
+    // Ignore delete errors (missing permissions, already deleted, etc.)
+  }
+  await sendDmWarning(
+    message,
+    `❌ Your message was removed by automated moderation (**${verdict.category}**): ${verdict.reason}`,
+  );
+  await logToModChannel(message, verdict.category, verdict.reason);
+  return true;
 }
 
 /**
@@ -98,7 +183,8 @@ export async function runAutomod(message: Message): Promise<boolean> {
       } catch {
         // Ignore delete errors
       }
-      await sendWarning(message, `❌ ${message.author}, messages in this channel must have an attachment.`);
+      await sendDmWarning(message, `❌ Messages in this channel must have an attachment.`);
+      await logToModChannel(message, 'attachment-only', 'Message had no attachment in an attachment-only channel.');
       return true;
     }
   }
@@ -110,7 +196,8 @@ export async function runAutomod(message: Message): Promise<boolean> {
     } catch {
       // Ignore delete errors (missing permissions, already deleted, etc.)
     }
-    await sendWarning(message, `❌ ${message.author}, URLs are not allowed in this server.`);
+    await sendDmWarning(message, `❌ URLs are not allowed in this server.`);
+    await logToModChannel(message, 'urls', 'Message contained a URL.');
     return true;
   }
 
@@ -121,7 +208,8 @@ export async function runAutomod(message: Message): Promise<boolean> {
     } catch {
       // Ignore delete errors
     }
-    await sendWarning(message, `❌ ${message.author}, GIFs are not allowed in this server.`);
+    await sendDmWarning(message, `❌ GIFs are not allowed in this server.`);
+    await logToModChannel(message, 'gif', 'Message contained a GIF attachment.');
     return true;
   }
 
@@ -134,7 +222,8 @@ export async function runAutomod(message: Message): Promise<boolean> {
       } catch {
         // Ignore delete errors
       }
-      await sendWarning(message, `❌ ${message.author}, GIF URLs are not allowed in this server.`);
+      await sendDmWarning(message, `❌ GIF URLs are not allowed in this server.`);
+      await logToModChannel(message, 'gif-url', 'Message contained a GIF URL.');
       return true;
     }
   }
@@ -146,9 +235,13 @@ export async function runAutomod(message: Message): Promise<boolean> {
     } catch {
       // Ignore delete errors
     }
-    await sendWarning(message, `❌ ${message.author}, please avoid excessive capitalization.`);
+    await sendDmWarning(message, `❌ Please avoid excessive capitalization.`);
+    await logToModChannel(message, 'caps', 'Message had excessive capitalization.');
     return true;
   }
+
+  // LLM-based moderation (runs last so cheap regex checks short-circuit first)
+  if (await runAiModeration(message)) return true;
 
   return false;
 }

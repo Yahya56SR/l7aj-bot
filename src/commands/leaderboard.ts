@@ -24,16 +24,26 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return;
   }
 
-  const entries = rows.map((row) => {
-    const user = interaction.client.users.cache.get(row.user_id);
-    return {
-      userId: row.user_id,
-      username: user?.username ?? 'Unknown user',
-      avatarUrl: user?.displayAvatarURL({ extension: 'png', size: 128 }) ?? '',
-      level: levelFromXp(row.xp).level,
-      totalXp: row.xp,
-    };
-  });
+  const entries = await Promise.all(
+    rows.map(async (row) => {
+      let user = interaction.client.users.cache.get(row.user_id);
+      if (!user) {
+        try {
+          user = await interaction.client.users.fetch(row.user_id);
+        } catch {
+          // User not found on Discord (e.g. left the server / deleted account)
+          user = undefined;
+        }
+      }
+      return {
+        userId: row.user_id,
+        username: user?.username ?? 'Unknown user',
+        avatarUrl: user?.displayAvatarURL({ extension: 'png', size: 128 }) ?? '',
+        level: levelFromXp(row.xp).level,
+        totalXp: row.xp,
+      };
+    }),
+  );
 
   await interaction.deferReply();
 
