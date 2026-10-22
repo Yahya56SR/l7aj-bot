@@ -62,6 +62,8 @@ export interface AutomodConfig {
   ignoredChannels: string[];
   /** Roles that bypass all automod checks */
   bypassRoles: string[];
+  /** Roles pinged in mod-logs when AI moderation flags a message (empty = ticket staff roles) */
+  alertRoleIds: string[];
   /** Channels where messages must have attachments */
   attachmentOnlyChannels: string[];
   /** Channel where automod actions are logged (empty = no mod logs) */
@@ -316,6 +318,7 @@ const DEFAULT_CONFIG: BotConfig = {
     capsMaxPercent: 70,
     ignoredChannels: [],
     bypassRoles: [],
+    alertRoleIds: [],
     attachmentOnlyChannels: [],
     modLogsChannelId: '',
     aiModeration: {

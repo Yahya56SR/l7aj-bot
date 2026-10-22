@@ -169,6 +169,7 @@ export class GeminiLiveModerator {
       console.warn('[Gemini Live] Queue full — allowing message without moderation', {
         queueLength: this.queue.length,
         maxQueueSize: this.maxQueueSize,
+        text: preview(text),
       });
       return Promise.resolve(null);
     }
@@ -191,6 +192,7 @@ export class GeminiLiveModerator {
         queueLength: this.queue.length,
         inFlight: Boolean(this.inFlight),
         connected: this.connected,
+        text: preview(text),
       });
       void this.pump();
     });
@@ -272,6 +274,7 @@ export class GeminiLiveModerator {
       console.debug('[Gemini Live] Sent message', {
         requestsInSession: this.requestsInSession,
         length: item.text.length,
+        text: preview(item.text),
       });
     } catch (err) {
       console.warn('[Gemini Live] Failed to send client content:', describeError(err));
@@ -306,7 +309,7 @@ export class GeminiLiveModerator {
     if (this.inFlight === item) this.inFlight = null;
     this.removeFromQueue(item);
 
-    console.debug('[Gemini Live] Request failed open', { reason });
+    console.debug('[Gemini Live] Request failed open', { reason, text: preview(item.text) });
     item.resolve(null);
   }
 
@@ -617,6 +620,7 @@ export class GeminiLiveModerator {
       console.debug('[Gemini Live] Dropping unsolicited response', {
         reason,
         length: responseText.length,
+        response: preview(responseText),
       });
       return;
     }
@@ -632,6 +636,8 @@ export class GeminiLiveModerator {
     console.debug('[Gemini Live] Turn finished', {
       reason,
       latencyMs,
+      text: preview(item.text),
+      response: preview(responseText),
       rawLength: responseText.length,
       flagged: verdict?.flagged ?? null,
       category: verdict?.category ?? null,
@@ -807,6 +813,12 @@ function extractJsonObject(text: string): string | null {
   }
 
   return null;
+}
+
+/** Collapse whitespace and shorten text so logs stay readable. */
+function preview(text: string, max = 300): string {
+  const singleLine = text.replace(/\s+/g, ' ').trim();
+  return singleLine.length <= max ? singleLine : `${singleLine.slice(0, max)}…`;
 }
 
 function describeError(err: unknown): string {

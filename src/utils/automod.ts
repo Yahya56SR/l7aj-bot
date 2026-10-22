@@ -1,6 +1,15 @@
-import { Message, TextChannel, ThreadChannel, EmbedBuilder } from 'discord.js';
+import { Message, TextChannel, ThreadChannel, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { getConfig, type AiModerationConfig } from '../config';
 import { GeminiLiveModerator, AiVerdict } from './gemini-live';
+
+/** Permissions that identify a member of the moderation team. */
+const MODERATION_PERMISSIONS = [
+  PermissionFlagsBits.Administrator,
+  PermissionFlagsBits.ManageMessages,
+  PermissionFlagsBits.KickMembers,
+  PermissionFlagsBits.BanMembers,
+  PermissionFlagsBits.ModerateMembers,
+] as const;
 
 let geminiModerator: GeminiLiveModerator | null = null;
 let geminiModeratorKey = '';
@@ -73,6 +82,17 @@ function hasBypassRoleFn(message: Message, bypassRoles: string[]): boolean {
   return message.member.roles.cache.some((role) => bypassRoles.includes(role.id));
 }
 
+/**
+ * Members with moderation permissions (and the server owner) are exempt from
+ * every automod check, including AI moderation, so staff cannot be warned or
+ * have their own messages deleted by the bot.
+ */
+function hasModerationPermissions(message: Message): boolean {
+  const member = message.member;
+  if (!member) return false;
+  return MODERATION_PERMISSIONS.some((permission) => member.permissions.has(permission));
+}
+
 /** Check if member has any of the GIF whitelist roles */
 function hasGifWhitelistRole(message: Message, gifWhitelistRoles: string[]): boolean {
   if (!message.member || !message.guild) return false;
@@ -100,27 +120,57 @@ async function sendDmWarning(message: Message, content: string): Promise<void> {
 }
 
 /** Log the automod action to the configured mod-logs channel. */
-async function logToModChannel(message: Message, category: string, reason: string): Promise<void> {
+async function logToModChannel(
+  message: Message,
+  category: string,
+  reason: string,
+  options: { pingStaff?: boolean; confidence?: number } = {},
+): Promise<void> {
   const cfg = getConfig();
   const channelId = cfg.automod.modLogsChannelId;
   if (!channelId || !message.guild) return;
   const channel = message.guild.channels.cache.get(channelId);
   if (!channel || !channel.isTextBased() || channel.isDMBased()) return;
 
+  // Prefer the dedicated automod alert roles; fall back to ticket staff so a
+  // server with staff roles configured gets notified out of the box.
+  const alertRoleIds = cfg.automod.alertRoleIds?.length
+    ? cfg.automod.alertRoleIds
+    : cfg.tickets.defaultStaffRoles ?? [];
+
   const embed = new EmbedBuilder()
-    .setColor(0xff9900)
-    .setTitle('🚨 Automod action')
+    .setColor(options.pingStaff ? 0xed4245 : 0xff9900)
+    .setTitle(options.pingStaff ? '🚨 AI moderation flagged a message' : '🚨 Automod action')
     .addFields(
       { name: 'User', value: `<@${message.author.id}> (${message.author.id})`, inline: true },
       { name: 'Channel', value: `<#${message.channelId}>`, inline: true },
       { name: 'Category', value: category, inline: true },
       { name: 'Reason', value: reason },
-      { name: 'Message', value: message.content ? truncate(message.content, 1000) : '*no text*' },
-    )
-    .setTimestamp();
+    );
+
+  if (typeof options.confidence === 'number') {
+    embed.addFields({ name: 'AI confidence', value: `${(options.confidence * 100).toFixed(0)}%`, inline: true });
+  }
+
+  embed.addFields(
+    { name: 'Message', value: message.content ? truncate(message.content, 1000) : '*no text*' },
+    { name: 'Jump', value: message.url },
+  );
+
+  embed.setTimestamp();
+
+  const mentions = alertRoleIds.map((id) => `<@&${id}>`).join(' ');
+  const content = options.pingStaff
+    ? `${mentions}${mentions ? ' — ' : ''}flagged message needs staff review. Delete or ban manually if needed.`
+    : undefined;
 
   try {
-    await channel.send({ embeds: [embed] });
+    await channel.send({
+      ...(content ? { content } : {}),
+      embeds: [embed],
+      // Only allow the configured roles to be pinged.
+      allowedMentions: options.pingStaff ? { roles: alertRoleIds } : { parse: [] },
+    });
   } catch {
     // Ignore mod-log send errors (missing permissions, etc.)
   }
@@ -140,6 +190,7 @@ async function runAiModeration(message: Message): Promise<boolean> {
     messageId: message.id,
     authorId: message.author.id,
     channelId: message.channelId,
+    content: truncate(message.content ?? '', 500),
     contentLength: message.content?.length ?? 0,
     enabled: ai.enabled,
     minLength: ai.minLength,
@@ -172,6 +223,7 @@ async function runAiModeration(message: Message): Promise<boolean> {
 
   console.debug('[Automod:AI] Verdict received', {
     messageId: message.id,
+    content: truncate(message.content ?? '', 500),
     flagged: verdict?.flagged ?? null,
     category: verdict?.category ?? null,
     confidence: verdict?.confidence ?? null,
@@ -193,7 +245,7 @@ async function runAiModeration(message: Message): Promise<boolean> {
   } catch {
     // Ignore delete errors (missing permissions, already deleted, etc.)
   }
-  console.debug('[Automod:AI] Message deleted — sending warning + mod-log.', {
+  console.debug('[Automod:AI] Message deleted — warning author + alerting staff.', {
     messageId: message.id,
     category: verdict.category,
     confidence: verdict.confidence,
@@ -202,7 +254,11 @@ async function runAiModeration(message: Message): Promise<boolean> {
     message,
     `❌ Your message was removed by automated moderation (**${verdict.category}**): ${verdict.reason}`,
   );
-  await logToModChannel(message, verdict.category, verdict.reason);
+  // Alert staff with the evidence so they can ban manually if needed.
+  await logToModChannel(message, verdict.category, verdict.reason, {
+    pingStaff: true,
+    confidence: verdict.confidence,
+  });
   return true;
 }
 
@@ -213,6 +269,19 @@ async function runAiModeration(message: Message): Promise<boolean> {
 export async function runAutomod(message: Message): Promise<boolean> {
   if (message.author.bot) return false;
   if (!message.guild) return false;
+
+  // Never moderate (or DM-warn) the server owner.
+  if (message.guild.ownerId === message.author.id) return false;
+
+  // Roles with moderation permissions are fully bypassed — no regex checks,
+  // no AI moderation, no DM warnings.
+  if (hasModerationPermissions(message)) {
+    console.debug('[Automod] Skipped — member has moderation permissions.', {
+      messageId: message.id,
+      authorId: message.author.id,
+    });
+    return false;
+  }
 
   const cfg = getConfig();
   const automod = cfg.automod;
