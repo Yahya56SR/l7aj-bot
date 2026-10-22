@@ -13,6 +13,18 @@ export const data = new SlashCommandBuilder()
   .setDescription('Show or modify bot configuration')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addSubcommand((sub) => sub.setName('show').setDescription('Display current settings'))
+  .addSubcommand((sub) =>
+    sub
+      .setName('logs')
+      .setDescription('Set the server logging channel')
+      .addChannelOption((opt) =>
+        opt
+          .setName('channel')
+          .setDescription('Channel where server change logs are sent')
+          .setRequired(true)
+          .addChannelTypes(ChannelType.GuildText),
+      ),
+  )
   .addSubcommandGroup((group) =>
     group
       .setName('automod')
@@ -296,6 +308,16 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   // Handle goodbye subcommands
   if (subcommandGroup === 'goodbye') {
     await handleGoodbyeConfig(interaction, subcommand);
+    return;
+  }
+
+  // Original show command
+  if (subcommandGroup === null && subcommand === 'logs') {
+    const channel = interaction.options.getChannel('channel', true);
+    updateConfig((c) => {
+      c.channels.logs = channel.id;
+    });
+    await interaction.reply({ content: `✅ Server logging channel set to ${channel}.`, ephemeral: true });
     return;
   }
 
