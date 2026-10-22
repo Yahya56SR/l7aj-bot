@@ -16,7 +16,7 @@ import * as verifyCmd from './commands/verify';
 import * as configCmd from './commands/config';
 import * as ticketsCmd from './commands/tickets';
 import { handleMessageCreate } from './events/messageCreate';
-import { handleVoiceStateUpdate, handleVoiceTick } from './events/voiceStateUpdate';
+import { handleVoiceStateUpdate, handleVoiceTick, seedVoiceSessions } from './events/voiceStateUpdate';
 import { handleReactionAdd, handleReactionRemove } from './events/messageReaction';
 import { handleGuildMemberAdd, handleGuildMemberRemove } from './events/guildMember';
 import { registerLoggingEvents } from './events/logging';
@@ -64,6 +64,9 @@ client.on('clientReady', () => {
     initializeTotalMembers(guild.memberCount);
   }
   // Award voice XP every minute to users still in VC.
+  // Track anyone already connected before this login so a restart doesn't
+  // silently skip their voice minutes.
+  seedVoiceSessions(client);
   // `ready` can fire again after a reconnect, so replace any old interval
   // instead of stacking a second one (which would double-award XP).
   if (voiceTickInterval) clearInterval(voiceTickInterval);

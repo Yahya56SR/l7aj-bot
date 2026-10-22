@@ -17,7 +17,7 @@ function awardVoiceXp(userId: string, minutes: number, guild?: any, user?: any):
   if (amount <= 0) return;
 
   try {
-    const { leveledUp, newLevel, oldLevel } = addXp(userId, amount, 'voice');
+    const { leveledUp, newLevel, oldLevel } = addXp(userId, amount, 'voice', minutes);
     if (leveledUp && guild && user) {
       // Use void to fire-and-forget, but catch errors
       handleLevelUp(guild, user, newLevel, oldLevel).catch((err) => {
@@ -56,6 +56,25 @@ export function handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceStat
   // voice XP until the member left and rejoined.
   if (changedChannel && newState.channelId && newState.member?.user) {
     voiceSessions.set(userId, now);
+  }
+}
+
+/**
+ * Start tracking members who were already in voice before this login. Without
+ * this a restart would ignore them until they switch channels, because no
+ * voiceStateUpdate fires for an unchanged state. Existing sessions survive
+ * reconnects (clientReady can fire again) and are left untouched.
+ */
+export function seedVoiceSessions(client: Client): void {
+  const now = Date.now();
+  const cfg = getConfig();
+
+  for (const guild of client.guilds.cache.values()) {
+    for (const state of guild.voiceStates.cache.values()) {
+      if (!state.channelId || !state.member?.user) continue;
+      if (cfg.xp.ignoreBots && state.member.user.bot) continue;
+      if (!voiceSessions.has(state.id)) voiceSessions.set(state.id, now);
+    }
   }
 }
 

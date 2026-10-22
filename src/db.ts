@@ -203,7 +203,7 @@ export function ensureUser(userId: string): UserRow {
   return getUser(userId)!;
 }
 
-export function addXp(userId: string, amount: number, source: string): {
+export function addXp(userId: string, amount: number, source: string, voiceMinutes: number = 0): {
   leveledUp: boolean;
   newLevel: number;
   oldLevel: number;
@@ -212,12 +212,13 @@ export function addXp(userId: string, amount: number, source: string): {
   const oldLevel = user.level;
   const newXp = user.xp + amount;
   const newLevel = levelFromXp(newXp).level;
+  const addedMinutes = Number.isFinite(voiceMinutes) ? Math.max(0, Math.floor(voiceMinutes)) : 0;
 
   cache.users[userId] = {
     xp: newXp,
     level: newLevel,
     last_msg_ts: user.last_msg_ts,
-    voice_minutes: user.voice_minutes,
+    voice_minutes: user.voice_minutes + addedMinutes,
   };
   save(cache);
 
