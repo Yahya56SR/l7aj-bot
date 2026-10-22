@@ -122,7 +122,7 @@ export class GeminiLiveModerator {
             console.debug('[Gemini Live] Session connected and ready.');
           },
           onmessage: (message) => this.handleServerMessage(message),
-          onclose: () => this.handleClose(),
+          onclose: (event: any) => this.handleClose(event),
           onerror: (err) => {
             console.warn('[Gemini Live] WebSocket error:', err);
             this.handleClose();
@@ -147,17 +147,28 @@ export class GeminiLiveModerator {
           resolve();
         } else if (!this.connecting && !this.session) {
           clearInterval(check);
+          console.debug('[Gemini Live] Session closed while waiting to connect');
           reject(new Error('Live session closed'));
         }
       }, 100);
       setTimeout(() => {
         clearInterval(check);
-        if (!this.connected) reject(new Error('Session connect timeout'));
+        if (!this.connected) {
+          console.warn('[Gemini Live] Session connect timeout after 15000ms');
+          reject(new Error('Session connect timeout'));
+        }
       }, 15000);
     });
   }
 
   private handleServerMessage(message: any) {
+    console.debug('[Gemini Live] Raw server message received', {
+      hasServerContent: !!message?.serverContent,
+      hasSetupComplete: !!message?.setupComplete,
+      hasToolCall: !!message?.toolCall,
+      keys: message ? Object.keys(message) : [],
+    });
+
     const serverContent = message?.serverContent;
     if (serverContent) {
       const modelTurn = serverContent.modelTurn;
@@ -183,6 +194,17 @@ export class GeminiLiveModerator {
         this.currentResponseText = '';
         this.resolvePending(verdict);
       }
+
+      if (serverContent.interrupted) {
+        console.warn('[Gemini Live] Turn was interrupted by server');
+        this.currentResponseText = '';
+      }
+    }
+
+    if (message?.setupComplete) {
+      console.debug('[Gemini Live] Setup complete received', {
+        sessionId: message.setupComplete.sessionId,
+      });
     }
   }
 
@@ -306,10 +328,16 @@ export class GeminiLiveModerator {
     });
   }
 
-  private handleClose() {
+  private handleClose(closeEvent?: any) {
     this.connected = false;
     this.session = null;
-    console.debug('[Gemini Live] Session closed, scheduling reconnect.');
+    console.warn('[Gemini Live] Session closed', {
+      wasClean: closeEvent?.wasClean,
+      code: closeEvent?.code,
+      reason: closeEvent?.reason,
+      reconnectAttempts: this.reconnectAttempts,
+      maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
+    });
     this.scheduleReconnect();
   }
 
