@@ -1,0 +1,1738 @@
+/* TALABA <3 bot dashboard — vanilla JS, no build step. */
+
+'use strict';
+
+const state = {
+  config: null,
+  saved: null,
+  revision: '',
+  meta: {},
+  health: null,
+  guild: { available: false, id: '', name: '', channels: [], categories: [], roles: [] },
+  stats: null,
+  active: 'overview',
+  saving: false,
+};
+
+const contentEl = document.getElementById('content');
+const navEl = document.getElementById('nav');
+const loginEl = document.getElementById('login');
+const appEl = document.getElementById('app');
+const toastEl = document.getElementById('toasts');
+const dirtyEl = document.getElementById('dirty-indicator');
+const saveBtn = document.querySelector('.topbar [data-action="save"]');
+
+const LOG_CATEGORIES = [
+  ['roles', 'Roles'],
+  ['members', 'Members'],
+  ['channels', 'Channels'],
+  ['messages', 'Messages'],
+  ['voice', 'Voice'],
+  ['threads', 'Threads'],
+  ['stage', 'Stage events'],
+  ['emojis', 'Emojis'],
+  ['webhooks', 'Webhooks'],
+  ['moderation', 'Moderation'],
+  ['guild', 'Server settings'],
+  ['commands', 'Slash commands'],
+  ['config', 'Bot config'],
+];
+
+const BUTTON_STYLES = [
+  { value: 1, label: 'Primary (blurple)' },
+  { value: 2, label: 'Secondary (grey)' },
+  { value: 3, label: 'Success (green)' },
+  { value: 4, label: 'Danger (red)' },
+];
+
+const sections = [
+  { id: 'overview', label: 'Overview', icon: '◈', subtitle: 'Bot status and quick toggles', render: renderOverview },
+  { id: 'xp', label: 'XP & Levels', icon: '⚡', subtitle: 'Message/voice rates, cooldown and level rewards', render: renderXp },
+  { id: 'channels', label: 'Channels & Logging', icon: '#', subtitle: 'Announcements and server event logs', render: renderChannels },
+  { id: 'greetings', label: 'Welcome & Goodbye', icon: '👋', subtitle: 'Join and leave messages, cards and tests', render: renderGreetings },
+  { id: 'automod', label: 'AutoMod & AI', icon: '🛡', subtitle: 'Filters, exemptions and Gemini moderation', render: renderAutomod },
+  { id: 'roles', label: 'Role Panels', icon: '🎭', subtitle: 'Button panels, reaction roles and verification', render: renderRoles },
+  { id: 'tickets', label: 'Tickets', icon: '🎫', subtitle: 'Panels, forms, staff roles and auto-close', render: renderTickets },
+  { id: 'autoreact', label: 'Auto-reactions', icon: '✨', subtitle: 'Emojis added automatically per channel', render: renderAutoReact },
+  { id: 'stats', label: 'Data & Stats', icon: '📈', subtitle: 'XP leaderboard and ticket history', render: renderStats },
+  { id: 'advanced', label: 'Advanced', icon: '🔧', subtitle: 'Secrets, raw JSON and environment', render: renderAdvanced },
+];
+
+/* ------------------------------------------------------------------ */
+/* Boot                                                                */
+/* ------------------------------------------------------------------ */
+
+bindEvents();
+init();
+
+async function init() {
+  let session;
+  try {
+    session = await api('/api/session');
+  } catch (err) {
+    showLogin('Could not reach the dashboard server.');
+    return;
+  }
+
+  if (!session.authenticated) {
+    showLogin();
+    return;
+  }
+
+  await boot();
+}
+
+async function boot() {
+  loginEl.classList.add('hidden');
+  appEl.classList.remove('hidden');
+
+  try {
+    await loadData();
+  } catch (err) {
+    toast(err.message || 'Failed to load configuration.', 'error', 7000);
+    return;
+  }
+
+  const hash = decodeURIComponent(window.location.hash.slice(1));
+  if (sections.some((section) => section.id === hash)) state.active = hash;
+
+  renderNav();
+  renderActive(true);
+  setInterval(refreshHealth, 20_000);
+}
+
+async function loadData() {
+  const [config, guild, stats, health] = await Promise.all([
+    api('/api/config'),
+    api('/api/guild'),
+    api('/api/stats'),
+    api('/api/health'),
+  ]);
+
+  state.config = config.config;
+  state.saved = clone(config.config);
+  state.revision = config.revision;
+  state.meta = config.meta;
+  state.guild = guild;
+  state.stats = stats;
+  state.health = health;
+
+  updateMetaUi();
+  updateDirty();
+}
+
+async function loadConfigOnly() {
+  const res = await api('/api/config');
+  state.config = res.config;
+  state.saved = clone(res.config);
+  state.revision = res.revision;
+  state.meta = res.meta;
+  updateMetaUi();
+  updateDirty();
+}
+
+async function refreshHealth() {
+  const wasReady = Boolean(state.health && state.health.bot && state.health.bot.ready);
+  try {
+    state.health = await api('/api/health');
+    updateStatus();
+  } catch {
+    return;
+  }
+
+  if (!wasReady && state.health.bot.ready) {
+    try {
+      state.guild = await api('/api/guild');
+    } catch {
+      /* ignore */
+    }
+    if (isDirty()) {
+      toast('Bot connected. Reload to enable channel and role pickers.', 'info', 6000);
+    } else {
+      redraw();
+      toast('Bot connected — channel and role pickers are ready.', 'success');
+    }
+  }
+}
+
+async function onLogin(event) {
+  event.preventDefault();
+  const password = document.getElementById('login-password').value;
+  const errorEl = document.getElementById('login-error');
+  errorEl.textContent = '';
+
+  try {
+    await api('/api/login', { method: 'POST', body: { password } });
+    document.getElementById('login-password').value = '';
+    await boot();
+  } catch (err) {
+    errorEl.textContent = err.message || 'Sign in failed.';
+  }
+}
+
+async function logout() {
+  try {
+    await api('/api/logout', { method: 'POST', body: {} });
+  } catch {
+    /* ignore */
+  }
+  state.config = null;
+  state.saved = null;
+  appEl.classList.add('hidden');
+  showLogin();
+}
+
+function showLogin(message) {
+  appEl.classList.add('hidden');
+  loginEl.classList.remove('hidden');
+  const errorEl = document.getElementById('login-error');
+  errorEl.textContent = message || '';
+  document.getElementById('login-password').focus();
+}
+
+/* ------------------------------------------------------------------ */
+/* HTTP + events                                                       */
+/* ------------------------------------------------------------------ */
+
+async function api(path, options = {}) {
+  const request = {
+    method: options.method || 'GET',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  };
+
+  if (options.body !== undefined) {
+    request.headers['Content-Type'] = 'application/json';
+    request.body = JSON.stringify(options.body);
+  }
+
+  const response = await fetch(path, request);
+  const isJson = (response.headers.get('content-type') || '').includes('application/json');
+  const data = isJson ? await response.json() : null;
+
+  if (response.status === 401 && path !== '/api/login') {
+    showLogin('Your session expired. Sign in again.');
+  }
+
+  if (!response.ok) {
+    const error = new Error((data && data.error) || `Request failed (${response.status})`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+
+  return data;
+}
+
+function bindEvents() {
+  document.addEventListener('click', onDocumentClick);
+  document.addEventListener('input', onFieldChange);
+  document.addEventListener('change', onFieldChange);
+  document.getElementById('login-form').addEventListener('submit', onLogin);
+
+  window.addEventListener('hashchange', () => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (id !== state.active) setActive(id, false);
+  });
+
+  window.addEventListener('beforeunload', (event) => {
+    if (!isDirty()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason;
+    const message = reason && reason.message ? reason.message : String(reason);
+    toast(`Unexpected error: ${message}`, 'error', 8000);
+  });
+
+  window.addEventListener('error', (event) => {
+    if (!event.message) return;
+    toast(`Unexpected error: ${event.message}`, 'error', 8000);
+  });
+}
+
+function onFieldChange(event) {
+  const el = event.target;
+  if (!el || typeof el.dataset !== 'object') return;
+
+  if (el.dataset.mappingKey !== undefined) {
+    if (!state.config) return;
+    state.config.reactionRoles.mappings[el.dataset.mappingKey] = el.value;
+    updateDirty();
+    return;
+  }
+
+  if (!el.dataset.path || !state.config) return;
+  setPath(state.config, el.dataset.path, readValue(el));
+  updateDirty();
+  updatePreviews();
+}
+
+async function onDocumentClick(event) {
+  const navButton = event.target.closest('[data-nav]');
+  if (navButton) {
+    setActive(navButton.dataset.nav, true);
+    return;
+  }
+
+  const button = event.target.closest('[data-action]');
+  if (!button || button.disabled) return;
+
+  const action = button.dataset.action;
+  try {
+    switch (action) {
+      case 'save':
+        await saveConfig();
+        return;
+      case 'reload':
+        await reloadAll();
+        return;
+      case 'logout':
+        await logout();
+        return;
+      case 'list-add':
+        addListItem(button);
+        return;
+      case 'list-remove':
+        removeListItem(button);
+        return;
+      case 'add-level-role':
+        addLevelRole();
+        return;
+      case 'remove-level-role':
+        delete state.config.levelRoles[button.dataset.level];
+        redraw();
+        return;
+      case 'add-mapping':
+        addMapping();
+        return;
+      case 'remove-mapping':
+        delete state.config.reactionRoles.mappings[button.dataset.key];
+        redraw();
+        return;
+      case 'add-role-panel':
+        addRolePanel();
+        return;
+      case 'remove-role-panel':
+        removeRolePanel(button.dataset.panelId);
+        return;
+      case 'add-panel-button':
+        addPanelButton(button.dataset.panelId);
+        return;
+      case 'remove-panel-button':
+        removePanelButton(button.dataset.panelId, Number(button.dataset.buttonIndex));
+        return;
+      case 'publish-role-panel':
+        await publishPanel('role', button.dataset.panelId);
+        return;
+      case 'add-ticket-panel':
+        addTicketPanel();
+        return;
+      case 'remove-ticket-panel':
+        removeTicketPanel(button.dataset.panelId);
+        return;
+      case 'add-form-field':
+        addFormField(button.dataset.panelId);
+        return;
+      case 'remove-form-field':
+        removeFormField(button.dataset.panelId, Number(button.dataset.fieldIndex));
+        return;
+      case 'publish-ticket-panel':
+        await publishPanel('ticket', button.dataset.panelId);
+        return;
+      case 'add-auto-react':
+        addAutoReact();
+        return;
+      case 'remove-auto-react':
+        state.config.autoReactions.splice(Number(button.dataset.index), 1);
+        redraw();
+        return;
+      case 'test-welcome':
+        await runAction('/api/actions/test-welcome', {}, 'Test welcome sent.');
+        return;
+      case 'test-goodbye':
+        await runAction('/api/actions/test-goodbye', {}, 'Test goodbye sent.');
+        return;
+      case 'ai-test':
+        await runAiTest();
+        return;
+      case 'raw-apply':
+        applyRawJson();
+        return;
+      case 'raw-reset':
+        state.config = clone(state.saved);
+        redraw();
+        toast('Reverted to the last saved configuration.', 'info');
+        return;
+      case 'reload-disk':
+        await reloadFromDisk();
+        return;
+      case 'save-secrets':
+        await saveSecrets();
+        return;
+      case 'refresh-stats':
+        state.stats = await api('/api/stats');
+        state.health = await api('/api/health');
+        updateStatus();
+        redraw();
+        toast('Stats refreshed.', 'info');
+        return;
+      default:
+        return;
+    }
+  } catch (err) {
+    toast(err.message || 'Action failed.', 'error', 7000);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Save / reload                                                       */
+/* ------------------------------------------------------------------ */
+
+function isDirty() {
+  return Boolean(state.config && state.saved && JSON.stringify(state.config) !== JSON.stringify(state.saved));
+}
+
+function updateDirty() {
+  const dirty = isDirty();
+  if (saveBtn) saveBtn.disabled = !dirty || state.saving;
+  dirtyEl.classList.toggle('hidden', !dirty);
+}
+
+async function saveConfig(silent = false) {
+  if (state.saving || !state.config) return false;
+  state.saving = true;
+  updateDirty();
+
+  try {
+    const res = await api('/api/config', {
+      method: 'PUT',
+      body: { config: state.config, revision: state.revision },
+    });
+
+    state.config = res.config;
+    state.saved = clone(res.config);
+    state.revision = res.revision;
+    state.meta = res.meta;
+    updateMetaUi();
+    if (!silent) toast('Configuration saved — changes are live.', 'success');
+    redraw();
+    return true;
+  } catch (err) {
+    if (err.status === 409 && err.data && err.data.config) {
+      state.config = err.data.config;
+      state.saved = clone(err.data.config);
+      state.revision = err.data.revision;
+      state.meta = err.data.meta || state.meta;
+      updateMetaUi();
+      redraw();
+      toast('Config changed elsewhere (slash command?). Loaded the latest version — re-apply your edits.', 'error', 8000);
+    } else {
+      toast(err.message || 'Could not save the configuration.', 'error', 8000);
+    }
+    return false;
+  } finally {
+    state.saving = false;
+    updateDirty();
+  }
+}
+
+async function reloadAll() {
+  if (isDirty() && !window.confirm('Discard unsaved changes and reload config.json?')) return;
+  await loadData();
+  redraw();
+  toast('Reloaded from config.json.', 'info');
+}
+
+async function reloadFromDisk() {
+  if (isDirty() && !window.confirm('Discard unsaved changes and reload the file from disk?')) return;
+  const res = await api('/api/actions/reload-config', { method: 'POST', body: {} });
+  state.config = res.config;
+  state.saved = clone(res.config);
+  state.revision = res.revision;
+  state.meta = res.meta;
+  updateMetaUi();
+  redraw();
+  toast('Reloaded config.json from disk.', 'success');
+}
+
+async function saveAndRun(action) {
+  const saved = await saveConfig(true);
+  if (!saved) return;
+  await action();
+}
+
+async function runAction(path, body, successMessage) {
+  await saveAndRun(async () => {
+    const result = await api(path, { method: 'POST', body });
+    toast(result && result.created ? 'Posted to Discord.' : successMessage, 'success');
+    await loadConfigOnly();
+    redraw();
+  });
+}
+
+async function publishPanel(kind, panelId) {
+  if (!panelId) return;
+  await saveAndRun(async () => {
+    const path = kind === 'role' ? '/api/actions/publish-role-panel' : '/api/actions/publish-ticket-panel';
+    const result = await api(path, { method: 'POST', body: { panelId } });
+    await loadConfigOnly();
+    redraw();
+    toast(result.created ? 'Panel posted to Discord.' : 'Panel message updated.', 'success');
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Structural edits                                                    */
+/* ------------------------------------------------------------------ */
+
+function addListItem(button) {
+  const path = button.dataset.path;
+  const picker = contentEl.querySelector(`[data-add-list="${path}"]`);
+  const value = picker ? picker.value : '';
+  if (!value) {
+    toast('Pick a value first.', 'error');
+    return;
+  }
+  const list = getPath(state.config, path) || [];
+  if (!list.includes(value)) list.push(value);
+  setPath(state.config, path, list);
+  redraw();
+}
+
+function removeListItem(button) {
+  const path = button.dataset.path;
+  const index = Number(button.dataset.index);
+  const list = getPath(state.config, path) || [];
+  if (index >= 0 && index < list.length) list.splice(index, 1);
+  redraw();
+}
+
+function addLevelRole() {
+  const level = document.getElementById('new-level-role-level').value.trim();
+  const roleId = document.getElementById('new-level-role-role').value;
+  if (!/^\d+$/.test(level)) {
+    toast('Enter the level as a whole number.', 'error');
+    return;
+  }
+  if (!roleId) {
+    toast('Pick a role for the reward.', 'error');
+    return;
+  }
+  state.config.levelRoles[String(Number.parseInt(level, 10))] = roleId;
+  redraw();
+}
+
+function addMapping() {
+  const emoji = document.getElementById('new-mapping-emoji').value.trim();
+  const roleId = document.getElementById('new-mapping-role').value;
+  if (!emoji) {
+    toast('Enter an emoji (unicode or <:name:id>).', 'error');
+    return;
+  }
+  if (!roleId) {
+    toast('Pick a role.', 'error');
+    return;
+  }
+  state.config.reactionRoles.mappings[emoji] = roleId;
+  redraw();
+}
+
+function nextId(prefix, list) {
+  let n = list.length + 1;
+  const used = new Set(list.map((entry) => entry.id));
+  while (used.has(`${prefix}${n}`)) n += 1;
+  return `${prefix}${n}`;
+}
+
+function addRolePanel() {
+  const panels = state.config.roles.panels;
+  panels.push({
+    id: nextId('p', panels),
+    name: `Panel ${panels.length + 1}`,
+    messageId: '',
+    channelId: '',
+    title: '🎭 Self-Assign Roles',
+    description: 'Click a button to get the role.',
+    buttons: [],
+    overrideRoles: false,
+  });
+  redraw();
+}
+
+function removeRolePanel(panelId) {
+  if (!window.confirm('Remove this panel from the config? The Discord message itself is not deleted.')) return;
+  state.config.roles.panels = state.config.roles.panels.filter((panel) => panel.id !== panelId);
+  redraw();
+}
+
+function addPanelButton(panelId) {
+  const panel = state.config.roles.panels.find((entry) => entry.id === panelId);
+  if (!panel) return;
+  const picker = document.getElementById(`new-button-role-${panelId}`);
+  const roleId = picker ? picker.value : '';
+  if (!roleId) {
+    toast('Pick a role first.', 'error');
+    return;
+  }
+  if (panel.buttons.some((button) => button.roleId === roleId)) {
+    toast('That role is already on this panel.', 'error');
+    return;
+  }
+  if (panel.buttons.length >= 25) {
+    toast('Discord allows at most 25 buttons per panel.', 'error');
+    return;
+  }
+  const role = state.guild.roles.find((entry) => entry.id === roleId);
+  panel.buttons.push({
+    roleId,
+    label: role ? role.name.slice(0, 80) : 'Role',
+    emoji: '',
+    style: 2,
+  });
+  redraw();
+}
+
+function removePanelButton(panelId, index) {
+  const panel = state.config.roles.panels.find((entry) => entry.id === panelId);
+  if (!panel) return;
+  panel.buttons.splice(index, 1);
+  redraw();
+}
+
+function addTicketPanel() {
+  const panels = state.config.tickets.panels;
+  panels.push({
+    id: nextId('t', panels),
+    name: `Ticket panel ${panels.length + 1}`,
+    channelId: '',
+    messageId: '',
+    title: '🎫 Support',
+    description: 'Click the button below to open a support ticket.',
+    buttonLabel: 'Open Ticket',
+    buttonEmoji: '🎫',
+    buttonStyle: 1,
+    categoryId: state.config.tickets.categoryId || '',
+    staffRoles: [],
+    pingRoles: [],
+    formFields: [],
+    welcomeMessage: '👋 Hello {user}! A staff member will be with you shortly.',
+    pingOnCreate: true,
+    autoCloseHours: 0,
+    transcriptsEnabled: true,
+    transcriptChannelId: '',
+  });
+  redraw();
+}
+
+function removeTicketPanel(panelId) {
+  if (!window.confirm('Remove this ticket panel from the config? The Discord message itself is not deleted.')) return;
+  state.config.tickets.panels = state.config.tickets.panels.filter((panel) => panel.id !== panelId);
+  redraw();
+}
+
+function addFormField(panelId) {
+  const panel = state.config.tickets.panels.find((entry) => entry.id === panelId);
+  if (!panel) return;
+  let n = panel.formFields.length + 1;
+  const used = new Set(panel.formFields.map((field) => field.id));
+  while (used.has(`field_${n}`)) n += 1;
+  panel.formFields.push({
+    id: `field_${n}`,
+    label: `Question ${n}`,
+    placeholder: '',
+    type: 'short',
+    required: true,
+  });
+  redraw();
+}
+
+function removeFormField(panelId, index) {
+  const panel = state.config.tickets.panels.find((entry) => entry.id === panelId);
+  if (!panel) return;
+  panel.formFields.splice(index, 1);
+  redraw();
+}
+
+function addAutoReact() {
+  const channelId = document.getElementById('new-autoreact-channel').value;
+  const emojis = splitCsv(document.getElementById('new-autoreact-emojis').value);
+  if (!channelId) {
+    toast('Pick a channel.', 'error');
+    return;
+  }
+  if (emojis.length === 0) {
+    toast('Add at least one emoji.', 'error');
+    return;
+  }
+  state.config.autoReactions = state.config.autoReactions.filter((entry) => entry.channelId !== channelId);
+  state.config.autoReactions.push({ channelId, emojis });
+  redraw();
+}
+
+async function runAiTest() {
+  const text = document.getElementById('ai-test-text').value.trim();
+  if (!text) {
+    toast('Paste a message to classify first.', 'error');
+    return;
+  }
+
+  try {
+    await saveAndRun(async () => {
+      const resultEl = document.getElementById('ai-result');
+      resultEl.textContent = 'Classifying…';
+      const result = await api('/api/ai/test', { method: 'POST', body: { text } });
+      const verdict = result.verdict;
+      if (!verdict) {
+        resultEl.textContent = 'No verdict returned (fail open — the message would be allowed).';
+        return;
+      }
+      resultEl.textContent =
+        `Flagged: ${verdict.flagged ? 'YES' : 'no'}\n` +
+        `Category: ${verdict.category}\n` +
+        `Confidence: ${Math.round(verdict.confidence * 100)}%\n` +
+        `Reason: ${verdict.reason}\n\n` +
+        'Dry run — no message was deleted.';
+    });
+  } catch (err) {
+    const resultEl = document.getElementById('ai-result');
+    if (resultEl) resultEl.textContent = err.message || 'AI test failed.';
+    throw err;
+  }
+}
+
+function applyRawJson() {
+  const textarea = document.getElementById('raw-json');
+  try {
+    const parsed = JSON.parse(textarea.value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Top-level JSON must be an object.');
+    }
+    state.config = parsed;
+    redraw();
+    toast('JSON applied to the form. Click "Save changes" to write it.', 'info', 6000);
+  } catch (err) {
+    toast(`Invalid JSON: ${err.message}`, 'error', 8000);
+  }
+}
+
+async function saveSecrets() {
+  const token = document.getElementById('secret-token').value.trim();
+  const geminiApiKey = document.getElementById('secret-gemini').value.trim();
+  if (!token && !geminiApiKey) {
+    toast('Enter a new token or Gemini API key first.', 'error');
+    return;
+  }
+  if (isDirty() && !window.confirm('Save secrets and discard the unsaved changes on this page?')) {
+    return;
+  }
+
+  const result = await api('/api/secrets', { method: 'POST', body: { token, geminiApiKey } });
+  document.getElementById('secret-token').value = '';
+  document.getElementById('secret-gemini').value = '';
+  await loadConfigOnly();
+  redraw();
+  toast(result.note || 'Secrets saved.', 'success', 7000);
+}
+
+/* ------------------------------------------------------------------ */
+/* Render helpers                                                      */
+/* ------------------------------------------------------------------ */
+
+function esc(value) {
+  return String(value == null ? '' : value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function getPath(object, path) {
+  return path.split('.').reduce((current, key) => (current == null ? undefined : current[key]), object);
+}
+
+function setPath(object, path, value) {
+  const parts = path.split('.');
+  const last = parts.pop();
+  let current = object;
+  for (const part of parts) {
+    if (current[part] == null || typeof current[part] !== 'object') {
+      current[part] = /^\d+$/.test(part) ? [] : {};
+    }
+    current = current[part];
+  }
+  current[last] = value;
+}
+
+function readValue(el) {
+  const type = el.dataset.type || 'string';
+  if (type === 'bool') return Boolean(el.checked);
+  if (type === 'number') {
+    const value = Number(el.value);
+    return Number.isFinite(value) ? value : 0;
+  }
+  if (type === 'number-optional') {
+    if (el.value === '') return undefined;
+    const value = Number(el.value);
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (type === 'csv') return splitCsv(el.value);
+  return el.value;
+}
+
+function splitCsv(value) {
+  return String(value || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+}
+
+function renderTemplate(template, values) {
+  return String(template || '').replace(/\{(\w+)\}/g, (match, key) =>
+    Object.prototype.hasOwnProperty.call(values, key) ? String(values[key]) : match,
+  );
+}
+
+function updatePreviews() {
+  if (!state.config) return;
+  const values = {
+    user: '@member',
+    username: 'member',
+    server: (state.health && state.health.guild.name) || 'TALABA <3',
+    memberCount: (state.stats && state.stats.xp.totalMembers) || 42,
+    level: 12,
+    role: '@Level 12',
+    xp: 320,
+    xpneeded: 480,
+    panel: 'Support',
+  };
+
+  const set = (id, template) => {
+    const node = document.getElementById(id);
+    if (node) node.textContent = renderTemplate(template, values);
+  };
+
+  set('preview-levelup', state.config.channels.levelUpMessage);
+  set('preview-welcome', state.config.welcome.message);
+  set('preview-welcome-image', state.config.welcome.welcomeImageMessage);
+  set('preview-goodbye', state.config.goodbye.message);
+}
+
+function card(title, body, options = {}) {
+  return `<section class="card ${options.className || ''}">
+    <header class="card-head">
+      <div>
+        <h2>${esc(title)}</h2>
+        ${options.subtitle ? `<p class="muted">${esc(options.subtitle)}</p>` : ''}
+      </div>
+      ${options.actions ? `<div class="card-actions">${options.actions}</div>` : ''}
+    </header>
+    <div class="card-body">${body}</div>
+  </section>`;
+}
+
+function field(label, control, hint = '') {
+  return `<div class="field">
+    <label>${esc(label)}</label>
+    ${control}
+    ${hint ? `<span class="hint">${hint}</span>` : ''}
+  </div>`;
+}
+
+function grid(fields, cols = 2) {
+  return `<div class="grid cols-${cols}">${fields.filter(Boolean).join('')}</div>`;
+}
+
+function textInput(path, value, options = {}) {
+  const attrs = [
+    'class="input"',
+    `data-path="${esc(path)}"`,
+    'data-type="string"',
+    `value="${esc(value == null ? '' : value)}"`,
+  ];
+  if (options.placeholder) attrs.push(`placeholder="${esc(options.placeholder)}"`);
+  if (options.maxlength) attrs.push(`maxlength="${options.maxlength}"`);
+  if (options.list) attrs.push(`list="${esc(options.list)}"`);
+  if (options.readonly) attrs.push('readonly');
+  return `<input ${attrs.join(' ')}>`;
+}
+
+function numberInput(path, value, options = {}) {
+  const attrs = [
+    'class="input"',
+    `data-path="${esc(path)}"`,
+    `data-type="${options.optional ? 'number-optional' : 'number'}"`,
+    `value="${value == null ? '' : esc(value)}"`,
+    `min="${options.min == null ? 0 : options.min}"`,
+    `max="${options.max == null ? 99999 : options.max}"`,
+    `step="${options.step == null ? 1 : options.step}"`,
+  ];
+  if (options.placeholder) attrs.push(`placeholder="${esc(options.placeholder)}"`);
+  return `<input type="number" ${attrs.join(' ')}>`;
+}
+
+function textarea(path, value, options = {}) {
+  const attrs = [
+    'class="input"',
+    `data-path="${esc(path)}"`,
+    'data-type="string"',
+  ];
+  if (options.id) attrs.push(`id="${esc(options.id)}"`);
+  if (options.placeholder) attrs.push(`placeholder="${esc(options.placeholder)}"`);
+  const rows = options.rows || 3;
+  return `<textarea ${attrs.join(' ')} rows="${rows}">${esc(value == null ? '' : value)}</textarea>`;
+}
+
+function toggle(path, checked, label, hint = '') {
+  return `<label class="toggle-row">
+    <span class="toggle-text"><span>${esc(label)}</span>${hint ? `<small>${esc(hint)}</small>` : ''}</span>
+    <input type="checkbox" data-path="${esc(path)}" data-type="bool" ${checked ? 'checked' : ''}>
+    <span class="toggle"></span>
+  </label>`;
+}
+
+function optionsSelect(options, settings = {}) {
+  const items = options.slice();
+  const value = settings.value == null ? '' : settings.value;
+  if (value !== '' && !items.some((option) => String(option.value) === String(value))) {
+    items.unshift({ value, label: `⚠ Unknown: ${value}` });
+  }
+  const attrs = ['class="input"'];
+  if (settings.id) attrs.push(`id="${esc(settings.id)}"`);
+  return `<select ${attrs.join(' ')}>${items
+    .map(
+      (option) =>
+        `<option value="${esc(option.value)}" ${String(option.value) === String(value) ? 'selected' : ''}>${esc(option.label)}</option>`,
+    )
+    .join('')}</select>`;
+}
+
+function select(path, value, options, settings = {}) {
+  const items = options.slice();
+  const current = value == null ? '' : value;
+  if (current !== '' && !items.some((option) => String(option.value) === String(current))) {
+    items.unshift({ value: current, label: `⚠ Unknown: ${current}` });
+  }
+  return `<select class="input" data-path="${esc(path)}" data-type="${settings.type || 'string'}">${items
+    .map(
+      (option) =>
+        `<option value="${esc(option.value)}" ${String(option.value) === String(current) ? 'selected' : ''}>${esc(option.label)}</option>`,
+    )
+    .join('')}</select>`;
+}
+
+function channelOptions(allowEmpty = true, emptyLabel = '— none —') {
+  const options = state.guild.channels.map((channel) => ({
+    value: channel.id,
+    label: `#${channel.name}${channel.parentName ? ` · ${channel.parentName}` : ''}`,
+  }));
+  if (allowEmpty) options.unshift({ value: '', label: emptyLabel });
+  return options;
+}
+
+function categoryOptions(allowEmpty = true, emptyLabel = '— none —') {
+  const options = state.guild.categories.map((category) => ({
+    value: category.id,
+    label: category.name,
+  }));
+  if (allowEmpty) options.unshift({ value: '', label: emptyLabel });
+  return options;
+}
+
+function roleOptions(allowEmpty = true, emptyLabel = '— none —') {
+  const options = state.guild.roles.map((role) => ({
+    value: role.id,
+    label: `@${role.name}${role.managed ? ' · managed' : !role.assignable ? ' · above bot' : ''}`,
+  }));
+  if (allowEmpty) options.unshift({ value: '', label: emptyLabel });
+  return options;
+}
+
+function channelSelect(path, value, settings = {}) {
+  if (!state.guild.available) return textInput(path, value, { placeholder: 'Discord channel ID' });
+  return select(path, value, channelOptions(settings.allowEmpty !== false, settings.emptyLabel), settings);
+}
+
+function categorySelect(path, value, settings = {}) {
+  if (!state.guild.available) return textInput(path, value, { placeholder: 'Discord category ID' });
+  return select(path, value, categoryOptions(settings.allowEmpty !== false, settings.emptyLabel), settings);
+}
+
+function roleSelect(path, value, settings = {}) {
+  if (!state.guild.available) return textInput(path, value, { placeholder: 'Discord role ID' });
+  return select(path, value, roleOptions(settings.allowEmpty !== false, settings.emptyLabel), settings);
+}
+
+function channelLabel(id) {
+  const channel = state.guild.channels.find((entry) => entry.id === id);
+  return channel ? `#${channel.name}` : `⚠ ${id}`;
+}
+
+function roleLabel(id) {
+  const role = state.guild.roles.find((entry) => entry.id === id);
+  return role ? `@${role.name}` : `⚠ ${id}`;
+}
+
+function chipList(path, ids, kind) {
+  const values = Array.isArray(ids) ? ids : [];
+  if (!state.guild.available) {
+    return textInput(path, values.join(', '), {
+      placeholder: 'Comma-separated IDs',
+    }).replace('data-type="string"', 'data-type="csv"');
+  }
+
+  const label = kind === 'role' ? roleLabel : channelLabel;
+  const chips = values.length
+    ? values
+        .map(
+          (id, index) =>
+            `<span class="chip"><span>${esc(label(id))}</span><button type="button" class="chip-x" data-action="list-remove" data-path="${esc(path)}" data-index="${index}" aria-label="Remove">×</button></span>`,
+        )
+        .join('')
+    : '<span class="muted tiny">None configured</span>';
+
+  const options = kind === 'role' ? roleOptions(true, '— add a role —') : channelOptions(true, '— add a channel —');
+  return `<div class="chips">${chips}</div>
+    <div class="row">
+      ${optionsSelect(options, { id: '' }).replace('<select class="input"', `<select class="input" data-add-list="${esc(path)}"`)}
+      <button type="button" class="btn small" data-action="list-add" data-path="${esc(path)}">Add</button>
+    </div>`;
+}
+
+function statCard(label, value, sub) {
+  return `<div class="stat">
+    <div class="stat-label">${esc(label)}</div>
+    <div class="stat-value">${esc(value)}</div>
+    <div class="stat-sub">${esc(sub)}</div>
+  </div>`;
+}
+
+function emptyRow(cols, text) {
+  return `<tr><td colspan="${cols}" class="muted">${esc(text)}</td></tr>`;
+}
+
+function discordMessageLink(channelId, messageId) {
+  const guildId = (state.health && state.health.guild.id) || state.guild.id;
+  if (!guildId || !channelId || !messageId) return '';
+  return `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;
+}
+
+function messageNote(channelId, messageId, hint) {
+  if (!messageId) {
+    return `<div class="section-note"><span>ℹ️</span><span>${esc(hint)}</span></div>`;
+  }
+  const link = discordMessageLink(channelId, messageId);
+  return `<div class="section-note"><span>🔗</span><span>Message ID <code>${esc(messageId)}</code>${
+    link ? ` · <a href="${esc(link)}" target="_blank" rel="noreferrer">open in Discord</a>` : ''
+  }</span></div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: overview                                                    */
+/* ------------------------------------------------------------------ */
+
+function renderOverview() {
+  const cfg = state.config;
+  const health = state.health || { bot: {}, guild: {} };
+  const stats = state.stats;
+  const bot = health.bot || {};
+  const guild = health.guild || {};
+
+  const statusCards = `<div class="stats">
+    ${statCard('Bot', bot.ready ? 'Online' : 'Offline', bot.tag || 'not logged in')}
+    ${statCard('Server', guild.name || '—', guild.memberCount ? `${guild.memberCount} members` : 'not connected')}
+    ${statCard('Tracked members', stats ? stats.xp.ranked : '—', 'members with XP')}
+    ${statCard('Open tickets', stats ? stats.tickets.open : '—', `${stats ? stats.tickets.total : 0} all time`)}
+  </div>`;
+
+  const quickToggles = [
+    toggle('welcome.enabled', cfg.welcome.enabled, 'Welcome messages', 'Greet members when they join'),
+    toggle('goodbye.enabled', cfg.goodbye.enabled, 'Goodbye messages', 'Announce members who leave'),
+    toggle('logging.enabled', cfg.logging.enabled, 'Server logging', 'Send server events to the log channel'),
+    toggle('automod.blockUrls', cfg.automod.blockUrls, 'Block URLs', 'Delete messages containing links'),
+    toggle('automod.blockGifs', cfg.automod.blockGifs, 'Block GIFs', 'Delete GIF uploads and links'),
+    toggle('automod.blockCaps', cfg.automod.blockCaps, 'Block CAPS', 'Delete shouty messages'),
+    toggle('automod.aiModeration.enabled', cfg.automod.aiModeration.enabled, 'AI moderation', 'Gemini classification for Darija/Arabizi'),
+  ].join('');
+
+  const envInfo = [
+    field('Guild ID', textInput('guildId', cfg.guildId, { placeholder: 'Server ID' }), 'Slash commands are registered here on restart.'),
+    field('Client ID', textInput('clientId', cfg.clientId, { placeholder: 'Application ID' }), 'Used for command registration on restart.'),
+    field(
+      'Config file',
+      `<div class="input" style="display:flex;align-items:center">${esc(state.meta.configPath || 'config.json')}</div>`,
+    ),
+    field(
+      'Bot token',
+      `<div class="row"><span class="pill ${state.meta.tokenConfigured ? 'ok' : 'bad'}">${
+        state.meta.tokenConfigured ? 'Configured' : 'Missing'
+      }</span><span class="muted tiny">from ${esc(state.meta.tokenSource || 'missing')}</span></div>`,
+      'The token is never displayed by the dashboard.',
+    ),
+    field(
+      'Gemini API key',
+      `<div class="row"><span class="pill ${state.meta.geminiKeyConfigured ? 'ok' : 'bad'}">${
+        state.meta.geminiKeyConfigured ? 'Configured' : 'Missing'
+      }</span><span class="muted tiny">from ${esc(state.meta.geminiKeySource || 'missing')}</span></div>`,
+      'Used only when AI moderation is enabled.',
+    ),
+  ].join('');
+
+  return `${statusCards}
+    ${card('Quick toggles', quickToggles, {
+      subtitle: 'Flip a switch, then press “Save changes” — no restart needed.',
+    })}
+    ${card('Live editing', `<div class="section-note"><span>⚡</span><span>
+      <strong>Changes apply instantly.</strong> The dashboard runs inside the bot process, so saving writes
+      <code>${esc(state.meta.configPath || 'config.json')}</code> and updates the running config at the same time.
+      Slash commands write to the same file; if one runs while you edit, the dashboard asks you to reload instead of overwriting it.
+    </span></div>
+    <div class="section-note"><span>🔒</span><span>
+      The bot token and Gemini API key are redacted in the API. Binds to
+      <code>${esc((health.dashboard && health.dashboard.host) || '127.0.0.1')}:${esc((health.dashboard && health.dashboard.port) || 3000)}</code>
+      ${health.dashboard && health.dashboard.passwordRequired ? 'and requires a password.' : 'with no password (local access only).'}
+    </span></div>`, { subtitle: 'How saving works' })}
+    ${card('Environment', grid([envInfo], 2), { subtitle: 'Read-only status, plus the guild ID used for commands' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: XP                                                          */
+/* ------------------------------------------------------------------ */
+
+function renderXp() {
+  const xp = state.config.xp;
+  const levelRows = Object.entries(state.config.levelRoles).sort((a, b) => Number(a[0]) - Number(b[0]));
+
+  const rows = levelRows.length
+    ? levelRows
+        .map(
+          ([level, roleId]) => `<tr>
+            <td><strong>${esc(level)}</strong></td>
+            <td>${roleSelect(`levelRoles.${level}`, roleId, { allowEmpty: false })}</td>
+            <td style="text-align:right"><button class="btn small danger" data-action="remove-level-role" data-level="${esc(level)}">Remove</button></td>
+          </tr>`,
+        )
+        .join('')
+    : emptyRow(3, 'No level rewards yet. Add one below.');
+
+  const addLevel = `<div class="row">
+    <input class="input" id="new-level-role-level" type="number" min="1" max="500" placeholder="Level" style="max-width:120px">
+    ${state.guild.available ? optionsSelect(roleOptions(true, '— pick a reward role —'), { id: 'new-level-role-role' }) : '<input class="input" id="new-level-role-role" placeholder="Role ID">'}
+    <button class="btn small" data-action="add-level-role">Add reward</button>
+  </div>`;
+
+  return `<p class="intro">MEE6-compatible XP. Members earn XP per message with a cooldown, and per minute in voice.
+    Level rewards are granted automatically; lower reward tiers are removed when a higher one is reached.</p>
+
+    ${card('Message XP', grid([
+      field('Minimum XP per message', numberInput('xp.perMessageMin', xp.perMessageMin, { min: 0, max: 10000 })),
+      field('Maximum XP per message', numberInput('xp.perMessageMax', xp.perMessageMax, { min: 0, max: 10000 })),
+      field('Cooldown (seconds)', numberInput('xp.cooldownSeconds', xp.cooldownSeconds, { min: 0, max: 86400 }), 'One XP grant per member per cooldown.'),
+      field('Bots earn no XP', toggle('xp.ignoreBots', xp.ignoreBots, 'Ignore bot accounts', 'Recommended: bots should not rank against members.')),
+    ], 2))}
+
+    ${card('Voice XP', grid([
+      field('Minimum XP per voice minute', numberInput('xp.perVoiceMinuteMin', xp.perVoiceMinuteMin, { min: 0, max: 10000 })),
+      field('Maximum XP per voice minute', numberInput('xp.perVoiceMinuteMax', xp.perVoiceMinuteMax, { min: 0, max: 10000 })),
+    ], 2), { subtitle: 'Awarded every minute to members connected to a voice channel' })}
+
+    ${card('XP channels', `${grid([
+      field('Only earn XP in', channelSelect('xp.xpChannel', xp.xpChannel, { emptyLabel: '— all channels —' }), 'Leave empty to allow every channel.'),
+    ], 1)}
+      <div class="field">
+        <span class="field-label">Channels with no XP</span>
+        ${chipList('xp.noXpChannels', xp.noXpChannels, 'channel')}
+        <span class="hint">Messages in these channels never award XP.</span>
+      </div>`, { subtitle: 'Restrict where members can earn XP' })}
+
+    ${card('Level rewards', `<div class="table-wrap"><table>
+        <thead><tr><th>Level</th><th>Role granted</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      ${addLevel}`, { subtitle: 'Role milestones' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: channels & logging                                          */
+/* ------------------------------------------------------------------ */
+
+function renderChannels() {
+  const cfg = state.config;
+  const categoryToggles = LOG_CATEGORIES.map(([key, label]) =>
+    toggle(`logging.categories.${key}`, cfg.logging.categories[key], label),
+  ).join('');
+
+  return `<p class="intro">Where the bot announces level-ups and writes server logs.</p>
+
+    ${card('Level-up announcements', `${grid([
+      field('Level-up channel', channelSelect('channels.levelUp', cfg.channels.levelUp, { emptyLabel: '— current channel —' })),
+    ], 1)}
+      ${field('Message template', textarea('channels.levelUpMessage', cfg.channels.levelUpMessage, { rows: 2 }), 'Placeholders: {user} {username} {level} {server} {role} {xp} {xpneeded}')}
+      <div class="preview-label">Preview</div>
+      <div class="preview" id="preview-levelup"></div>`)}
+
+    ${card('Log channels', grid([
+      field('Event log channel', channelSelect('channels.logs', cfg.channels.logs), 'Used by every server-event logger.'),
+      field('Override channel', channelSelect('logging.channelId', cfg.logging.channelId), 'When set, takes priority over the event log channel.'),
+    ], 2), { subtitle: 'Both point at a text channel the bot can post in' })}
+
+    ${card('Server event logging', `${toggle('logging.enabled', cfg.logging.enabled, 'Enable server logging', 'Master switch for all categories below.')}
+      <div class="grid cols-3">${categoryToggles}</div>`, { subtitle: 'Choose which events reach the log channel' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: greetings                                                   */
+/* ------------------------------------------------------------------ */
+
+function renderGreetings() {
+  const cfg = state.config;
+  return `<p class="intro">Welcome and goodbye messages support placeholders: {user} (mention), {username}, {server} and {memberCount}.</p>
+
+    ${card('Welcome', `${toggle('welcome.enabled', cfg.welcome.enabled, 'Enable welcome messages', 'Sent when a member joins the server.')}
+      ${grid([
+        field('Channel', channelSelect('welcome.channelId', cfg.welcome.channelId)),
+        field('Background image', textInput('welcome.backgroundImage', cfg.welcome.backgroundImage, { placeholder: 'assets/bg.jpg' }), 'Path relative to the project root.'),
+      ], 2)}
+      ${field('Discord message', textarea('welcome.message', cfg.welcome.message, { rows: 2 }))}
+      ${field('Welcome card text', textarea('welcome.welcomeImageMessage', cfg.welcome.welcomeImageMessage, { rows: 2 }), 'Text rendered inside the PNG card.')}
+      <div class="grid cols-2">
+        <div><div class="preview-label">Discord preview</div><div class="preview" id="preview-welcome"></div></div>
+        <div><div class="preview-label">Card preview</div><div class="preview" id="preview-welcome-image"></div></div>
+      </div>
+      <div class="btn-row"><button class="btn small" data-action="test-welcome">Send test welcome</button><span class="muted tiny">Saves first, then posts in the configured channel.</span></div>`,
+      { subtitle: 'Join message and PNG welcome card' })}
+
+    ${card('Goodbye', `${toggle('goodbye.enabled', cfg.goodbye.enabled, 'Enable goodbye messages', 'Sent when a member leaves the server.')}
+      ${grid([field('Channel', channelSelect('goodbye.channelId', cfg.goodbye.channelId))], 1)}
+      ${field('Message', textarea('goodbye.message', cfg.goodbye.message, { rows: 2 }))}
+      <div class="preview-label">Preview</div>
+      <div class="preview" id="preview-goodbye"></div>
+      <div class="btn-row"><button class="btn small" data-action="test-goodbye">Send test goodbye</button><span class="muted tiny">Saves first, then posts in the configured channel.</span></div>`,
+      { subtitle: 'Leave message' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: automod                                                     */
+/* ------------------------------------------------------------------ */
+
+function renderAutomod() {
+  const cfg = state.config;
+  const auto = cfg.automod;
+  const ai = auto.aiModeration;
+
+  const aiCategories = `<input class="input" data-path="automod.aiModeration.categories" data-type="csv" value="${esc(
+    (ai.categories || []).join(', '),
+  )}">`;
+
+  return `<p class="intro">Regex filters catch links, GIFs and shouting. AI moderation is a Gemini Live classifier tuned for
+    Moroccan Darija, Arabizi and French code-switching. AI checks still run for roles that bypass the regex filters.</p>
+
+    ${card('Message filters', `<div class="grid cols-2">
+        ${toggle('automod.blockUrls', auto.blockUrls, 'Block URLs', 'Deletes messages containing a link.')}
+        ${toggle('automod.blockGifs', auto.blockGifs, 'Block GIFs', 'GIF uploads and GIF links.')}
+        ${toggle('automod.blockCaps', auto.blockCaps, 'Block CAPS', 'Excessive capital letters.')}
+      </div>
+      ${grid([
+        field('CAPS minimum length', numberInput('automod.capsMinLength', auto.capsMinLength, { min: 1, max: 500 })),
+        field('CAPS maximum percent', numberInput('automod.capsMaxPercent', auto.capsMaxPercent, { min: 1, max: 100 })),
+      ], 2)}
+      ${grid([
+        field('Mod-logs channel', channelSelect('automod.modLogsChannelId', auto.modLogsChannelId), 'Automod actions and AI flags are reported here.'),
+      ], 1)}
+      <div class="field">
+        <span class="field-label">Alert roles</span>
+        ${chipList('automod.alertRoleIds', auto.alertRoleIds, 'role')}
+        <span class="hint">Pinged in mod-logs when AI moderation flags a message. Empty = ticket staff roles.</span>
+      </div>`, { subtitle: 'Basic content filters' })}
+
+    ${card('Exemptions', `${grid([
+      field('GIF whitelist roles', chipList('automod.gifWhitelistRoles', auto.gifWhitelistRoles, 'role'), 'These roles may post GIF links.'),
+      field('Bypass roles', chipList('automod.bypassRoles', auto.bypassRoles, 'role'), 'Skips regex filters (AI still applies).'),
+      field('Ignored channels', chipList('automod.ignoredChannels', auto.ignoredChannels, 'channel'), 'Automod is disabled in these channels.'),
+      field('Attachment-only channels', chipList('automod.attachmentOnlyChannels', auto.attachmentOnlyChannels, 'channel'), 'Messages without an attachment are removed.'),
+    ], 1)}`)}
+
+    ${card('AI moderation (Gemini Live)', `${toggle('automod.aiModeration.enabled', ai.enabled, 'Enable AI moderation', 'Fails open: if the model is unreachable, messages are allowed.')}
+      ${grid([
+        field('Model', textInput('automod.aiModeration.model', ai.model, { placeholder: 'gemini-3.8-live', list: 'ai-models' }), 'Use gemini-3.8-live for latency, or the extended-thinking model for harder cases.'),
+        field('Thinking level', select('automod.aiModeration.thinkingLevel', ai.thinkingLevel, [
+          { value: 'minimal', label: 'minimal' },
+          { value: 'low', label: 'low' },
+          { value: 'medium', label: 'medium' },
+          { value: 'high', label: 'high' },
+        ]), 'Ignored for gemini-3.8-live.'),
+        field('Minimum message length', numberInput('automod.aiModeration.minLength', ai.minLength, { min: 0, max: 2000 })),
+        field('Confidence threshold', numberInput('automod.aiModeration.confidenceThreshold', ai.confidenceThreshold, { min: 0, max: 1, step: 0.05 }), '0-1. Higher = fewer false positives.'),
+      ], 2)}
+      <datalist id="ai-models">
+        <option value="gemini-3.8-live"></option>
+        <option value="gemini-3.8-live-extended-thinking"></option>
+      </datalist>
+      ${field('Flag categories', aiCategories, 'Comma-separated, e.g. insult, hate, harassment, threat, spam, sexual')}
+      ${field('System prompt', `<textarea class="input" data-path="automod.aiModeration.systemPrompt" data-type="string" rows="11">${esc(
+        ai.systemPrompt,
+      )}</textarea>`, 'Plain-English policy. The model must reply with JSON; the bot parses the verdict.')}
+      <div class="section-note"><span>🧪</span><span>
+        <strong>Dry run.</strong> Saves the current settings, classifies the text below and shows the verdict without deleting anything.
+      </span></div>
+      <div class="field">
+        <label>Test text</label>
+        <textarea class="input" id="ai-test-text" rows="3" placeholder="e.g. nta 7mar, sir t9awed"></textarea>
+      </div>
+      <div class="btn-row"><button class="btn small" data-action="ai-test">Classify text</button></div>
+      <div class="preview" id="ai-result">Verdict will appear here.</div>`,
+      { subtitle: 'LLM-based moderation for Darija and Arabizi' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: roles                                                       */
+/* ------------------------------------------------------------------ */
+
+function renderRoles() {
+  const cfg = state.config;
+  const mappings = Object.entries(cfg.reactionRoles.mappings || {});
+
+  const mappingRows = mappings.length
+    ? mappings
+        .map(
+          ([emoji, roleId]) => `<tr>
+            <td><code>${esc(emoji)}</code></td>
+            <td>${
+              state.guild.available
+                ? optionsSelect(roleOptions(false), { value: roleId }).replace(
+                    '<select class="input"',
+                    `<select class="input" data-mapping-key="${esc(emoji)}"`,
+                  )
+                : `<input class="input" data-mapping-key="${esc(emoji)}" value="${esc(roleId)}">`
+            }</td>
+            <td style="text-align:right"><button class="btn small danger" data-action="remove-mapping" data-key="${esc(emoji)}">Remove</button></td>
+          </tr>`,
+        )
+        .join('')
+    : emptyRow(3, 'No reaction-role mappings yet.');
+
+  const reactionCard = card('Reaction roles', `${grid([
+    field('Channel', channelSelect('reactionRoles.channelId', cfg.reactionRoles.channelId)),
+    field('Message ID', textInput('reactionRoles.messageId', cfg.reactionRoles.messageId, { placeholder: 'Right-click → Copy Message ID' })),
+  ], 2)}
+    <div class="table-wrap"><table>
+      <thead><tr><th>Emoji</th><th>Role</th><th></th></tr></thead>
+      <tbody>${mappingRows}</tbody>
+    </table></div>
+    <div class="row">
+      <input class="input" id="new-mapping-emoji" placeholder="Emoji (e.g. 👍 or <:name:id>)" style="max-width:260px">
+      ${state.guild.available ? optionsSelect(roleOptions(true, '— pick a role —'), { id: 'new-mapping-role' }) : '<input class="input" id="new-mapping-role" placeholder="Role ID">'}
+      <button class="btn small" data-action="add-mapping">Add mapping</button>
+    </div>
+    <div class="section-note"><span>ℹ️</span><span>Reaction roles work on the saved message. Create the message with <code>/reactionroles setup</code>.</span></div>`,
+    { subtitle: 'React to a message to grant a role' });
+
+  const panelCards = cfg.roles.panels.length
+    ? cfg.roles.panels.map((panel, index) => rolePanelCard(panel, index)).join('')
+    : '<div class="empty">No button panels yet. Click “New panel” to add one.</div>';
+
+  const verification = card('Verification', `${grid([
+    field('Channel', channelSelect('verification.channelId', cfg.verification.channelId)),
+    field('Message ID', textInput('verification.messageId', cfg.verification.messageId, { placeholder: 'Right-click → Copy Message ID' })),
+    field('Role granted', roleSelect('verification.roleId', cfg.verification.roleId)),
+    field('Show unverify button', toggle('verification.showUnverify', cfg.verification.showUnverify, 'Allow members to remove verification')),
+  ], 2)}
+    ${field('Embed title', textInput('verification.title', cfg.verification.title))}
+    ${field('Embed description', textarea('verification.description', cfg.verification.description, { rows: 2 }))}
+    ${messageNote(cfg.verification.channelId, cfg.verification.messageId, 'Post the verification message with /verify setup; this page edits the saved settings.')}`,
+    { subtitle: 'Single button that grants the verified role' });
+
+  return `<p class="intro">Button panels toggle roles for members. Edits here update the saved config — press “Update message” on a panel
+    to push the new title, description and buttons to the Discord message.</p>
+    ${reactionCard}
+    ${card('Button role panels', `<div class="btn-row" style="margin-bottom:4px"><button class="btn small" data-action="add-role-panel">New panel</button></div>${panelCards}`, {
+      subtitle: 'Self-assign roles, grouped by panel',
+    })}
+    ${verification}`;
+}
+
+function rolePanelCard(panel, index) {
+  const buttonRows = panel.buttons.length
+    ? panel.buttons
+        .map(
+          (button, buttonIndex) => `<tr>
+            <td>${roleSelect(`roles.panels.${index}.buttons.${buttonIndex}.roleId`, button.roleId, { allowEmpty: false })}</td>
+            <td>${textInput(`roles.panels.${index}.buttons.${buttonIndex}.label`, button.label, { maxlength: 80 })}</td>
+            <td style="max-width:90px">${textInput(`roles.panels.${index}.buttons.${buttonIndex}.emoji`, button.emoji, { placeholder: '🎮' })}</td>
+            <td style="min-width:150px">${select(`roles.panels.${index}.buttons.${buttonIndex}.style`, button.style, BUTTON_STYLES, { type: 'number' })}</td>
+            <td style="text-align:right"><button class="btn small danger" data-action="remove-panel-button" data-panel-id="${esc(panel.id)}" data-button-index="${buttonIndex}">Remove</button></td>
+          </tr>`,
+        )
+        .join('')
+    : emptyRow(5, 'No buttons yet. Add a role below.');
+
+  return `<div class="panel-card">
+    <div class="panel-card-head">
+      <div class="panel-card-title">
+        <span class="pill accent">${esc(panel.id)}</span>
+        ${textInput(`roles.panels.${index}.name`, panel.name, { placeholder: 'Panel name' })}
+      </div>
+      <div class="card-actions">
+        <button class="btn small" data-action="publish-role-panel" data-panel-id="${esc(panel.id)}">${panel.messageId ? 'Update message' : 'Post to Discord'}</button>
+        <button class="btn small danger" data-action="remove-role-panel" data-panel-id="${esc(panel.id)}">Delete</button>
+      </div>
+    </div>
+    <div class="panel-card-body">
+      ${grid([
+        field('Channel', channelSelect(`roles.panels.${index}.channelId`, panel.channelId)),
+        field('Embed title', textInput(`roles.panels.${index}.title`, panel.title)),
+      ], 2)}
+      ${field('Embed description', textarea(`roles.panels.${index}.description`, panel.description, { rows: 2 }))}
+      ${toggle(`roles.panels.${index}.overrideRoles`, panel.overrideRoles, 'Only one role from this panel', 'Clicking a button removes the other roles from this panel (useful for colour roles).')}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Role</th><th>Label</th><th>Emoji</th><th>Style</th><th></th></tr></thead>
+        <tbody>${buttonRows}</tbody>
+      </table></div>
+      <div class="row">
+        ${state.guild.available ? optionsSelect(roleOptions(true, '— add a role button —'), { id: `new-button-role-${panel.id}` }) : `<input class="input" id="new-button-role-${esc(panel.id)}" placeholder="Role ID">`}
+        <button class="btn small" data-action="add-panel-button" data-panel-id="${esc(panel.id)}">Add button</button>
+      </div>
+      ${messageNote(panel.channelId, panel.messageId, 'This panel has not been posted yet. Pick a channel, save, then press “Post to Discord”.')}
+    </div>
+  </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: tickets                                                     */
+/* ------------------------------------------------------------------ */
+
+function renderTickets() {
+  const cfg = state.config;
+  const panels = cfg.tickets.panels.length
+    ? cfg.tickets.panels.map((panel, index) => ticketPanelCard(panel, index)).join('')
+    : '<div class="empty">No ticket panels yet. Click “New panel” to add one.</div>';
+
+  return `<p class="intro">Members open a private channel by clicking a panel button. Staff roles can see tickets; ping roles are mentioned
+    when one is created. Changes to form fields apply the next time a member opens a ticket.</p>
+
+    ${card('Ticket system', `${grid([
+      field('Ticket category', categorySelect('tickets.categoryId', cfg.tickets.categoryId), 'New ticket channels are created here.'),
+      field('Log channel', channelSelect('tickets.logChannelId', cfg.tickets.logChannelId), 'Ticket events: open, claim, close, transcripts.'),
+    ], 2)}
+      <div class="field">
+        <span class="field-label">Default staff roles</span>
+        ${chipList('tickets.defaultStaffRoles', cfg.tickets.defaultStaffRoles, 'role')}
+        <span class="hint">Used by panels that do not set their own staff roles.</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Default ping roles</span>
+        ${chipList('tickets.defaultPingRoles', cfg.tickets.defaultPingRoles, 'role')}
+      </div>`, { subtitle: 'Shared settings for every panel' })}
+
+    ${card('Panels', `<div class="btn-row" style="margin-bottom:4px"><button class="btn small" data-action="add-ticket-panel">New panel</button></div>${panels}`, {
+      subtitle: 'Each panel has its own channel, category, form and staff roles',
+    })}`;
+}
+
+function ticketPanelCard(panel, index) {
+  const fieldRows = panel.formFields.length
+    ? panel.formFields
+        .map(
+          (formField, fieldIndex) => `<tr>
+            <td>${textInput(`tickets.panels.${index}.formFields.${fieldIndex}.label`, formField.label, { maxlength: 45 })}</td>
+            <td>${textInput(`tickets.panels.${index}.formFields.${fieldIndex}.placeholder`, formField.placeholder || '')}</td>
+            <td>${select(`tickets.panels.${index}.formFields.${fieldIndex}.type`, formField.type, [
+              { value: 'short', label: 'Short text' },
+              { value: 'paragraph', label: 'Paragraph' },
+            ])}</td>
+            <td>${toggle(`tickets.panels.${index}.formFields.${fieldIndex}.required`, formField.required, 'Required')}</td>
+            <td>${numberInput(`tickets.panels.${index}.formFields.${fieldIndex}.minLength`, formField.minLength, { optional: true, min: 0, max: 4000 })}</td>
+            <td>${numberInput(`tickets.panels.${index}.formFields.${fieldIndex}.maxLength`, formField.maxLength, { optional: true, min: 1, max: 4000 })}</td>
+            <td style="text-align:right"><button class="btn small danger" data-action="remove-form-field" data-panel-id="${esc(panel.id)}" data-field-index="${fieldIndex}">Remove</button></td>
+          </tr>`,
+        )
+        .join('')
+    : emptyRow(7, 'No form fields — the button opens a ticket immediately.');
+
+  return `<div class="panel-card">
+    <div class="panel-card-head">
+      <div class="panel-card-title">
+        <span class="pill accent">${esc(panel.id)}</span>
+        ${textInput(`tickets.panels.${index}.name`, panel.name, { placeholder: 'Panel name' })}
+      </div>
+      <div class="card-actions">
+        <button class="btn small" data-action="publish-ticket-panel" data-panel-id="${esc(panel.id)}">${panel.messageId ? 'Update message' : 'Post to Discord'}</button>
+        <button class="btn small danger" data-action="remove-ticket-panel" data-panel-id="${esc(panel.id)}">Delete</button>
+      </div>
+    </div>
+    <div class="panel-card-body">
+      ${grid([
+        field('Panel channel', channelSelect(`tickets.panels.${index}.channelId`, panel.channelId)),
+        field('Ticket category', categorySelect(`tickets.panels.${index}.categoryId`, panel.categoryId)),
+        field('Transcript channel', channelSelect(`tickets.panels.${index}.transcriptChannelId`, panel.transcriptChannelId), 'Falls back to the ticket log channel.'),
+      ], 3)}
+      ${grid([
+        field('Embed title', textInput(`tickets.panels.${index}.title`, panel.title)),
+        field('Button label', textInput(`tickets.panels.${index}.buttonLabel`, panel.buttonLabel, { maxlength: 80 })),
+        field('Button emoji', textInput(`tickets.panels.${index}.buttonEmoji`, panel.buttonEmoji, { placeholder: '🎫' })),
+        field('Button style', select(`tickets.panels.${index}.buttonStyle`, panel.buttonStyle, BUTTON_STYLES, { type: 'number' })),
+      ], 2)}
+      ${field('Embed description', textarea(`tickets.panels.${index}.description`, panel.description, { rows: 2 }))}
+      ${field('Welcome message', textarea(`tickets.panels.${index}.welcomeMessage`, panel.welcomeMessage, { rows: 2 }), 'Placeholders: {user} and {panel}.')}
+      <div class="grid cols-2">
+        ${toggle(`tickets.panels.${index}.pingOnCreate`, panel.pingOnCreate, 'Ping staff when a ticket opens')}
+        ${toggle(`tickets.panels.${index}.transcriptsEnabled`, panel.transcriptsEnabled, 'Save a transcript when closed')}
+      </div>
+      ${grid([field('Auto-close after (hours)', numberInput(`tickets.panels.${index}.autoCloseHours`, panel.autoCloseHours, { min: 0, max: 8760 }), '0 disables auto-close. Idle tickets only.')], 1)}
+      <div class="field">
+        <span class="field-label">Staff roles</span>
+        ${chipList(`tickets.panels.${index}.staffRoles`, panel.staffRoles, 'role')}
+      </div>
+      <div class="field">
+        <span class="field-label">Ping roles</span>
+        ${chipList(`tickets.panels.${index}.pingRoles`, panel.pingRoles, 'role')}
+      </div>
+      <div class="field">
+        <span class="field-label">Form fields</span>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Label</th><th>Placeholder</th><th>Type</th><th>Required</th><th>Min</th><th>Max</th><th></th></tr></thead>
+          <tbody>${fieldRows}</tbody>
+        </table></div>
+        <div class="btn-row"><button class="btn small" data-action="add-form-field" data-panel-id="${esc(panel.id)}">Add form field</button></div>
+      </div>
+      ${messageNote(panel.channelId, panel.messageId, 'This panel has not been posted yet. Pick a channel and category, save, then press “Post to Discord”.')}
+    </div>
+  </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: auto-reactions                                              */
+/* ------------------------------------------------------------------ */
+
+function renderAutoReact() {
+  const entries = state.config.autoReactions || [];
+  const rows = entries.length
+    ? entries
+        .map(
+          (entry, index) => `<tr>
+            <td>${channelSelect(`autoReactions.${index}.channelId`, entry.channelId, { allowEmpty: false })}</td>
+            <td><input class="input" data-path="autoReactions.${index}.emojis" data-type="csv" value="${esc((entry.emojis || []).join(', '))}" placeholder="👍, ❤️, 🎉"></td>
+            <td style="text-align:right"><button class="btn small danger" data-action="remove-auto-react" data-index="${index}">Remove</button></td>
+          </tr>`,
+        )
+        .join('')
+    : emptyRow(3, 'No auto-reaction channels yet.');
+
+  return `<p class="intro">The bot reacts to every message in the listed channels with the chosen emojis — useful for starboards,
+    suggestion channels or quick voting.</p>
+    ${card('Auto-reaction channels', `<div class="table-wrap"><table>
+        <thead><tr><th>Channel</th><th>Emojis (comma-separated)</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <div class="row">
+        ${state.guild.available ? optionsSelect(channelOptions(true, '— pick a channel —'), { id: 'new-autoreact-channel' }) : '<input class="input" id="new-autoreact-channel" placeholder="Channel ID">'}
+        <input class="input" id="new-autoreact-emojis" placeholder="Emojis (e.g. 👍, 🔥)" style="max-width:280px">
+        <button class="btn small" data-action="add-auto-react">Add channel</button>
+      </div>`, { subtitle: 'React automatically to new messages' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: stats                                                       */
+/* ------------------------------------------------------------------ */
+
+function renderStats() {
+  const stats = state.stats;
+  if (!stats) {
+    return `<div class="empty">Stats are loading…</div>`;
+  }
+
+  const leaderboard = stats.xp.leaderboard.length
+    ? stats.xp.leaderboard
+        .map(
+          (row, index) => `<tr>
+            <td>${index + 1}</td>
+            <td>${esc(row.username || row.user_id)}<br><span class="tiny muted">${esc(row.user_id)}</span></td>
+            <td>${esc(row.level)}</td>
+            <td>${esc(row.xp)}</td>
+            <td>${esc(row.voice_minutes)} min</td>
+          </tr>`,
+        )
+        .join('')
+    : emptyRow(5, 'No XP recorded yet.');
+
+  const tickets = stats.tickets.recent.length
+    ? stats.tickets.recent
+        .map((ticket) => {
+          const pillClass =
+            ticket.status === 'open' ? 'accent' : ticket.status === 'claimed' ? 'warn' : 'ok';
+          return `<tr>
+            <td><code>${esc(ticket.id)}</code></td>
+            <td><span class="pill ${pillClass}">${esc(ticket.status)}</span></td>
+            <td>${esc(ticket.creatorName || ticket.creatorId)}</td>
+            <td>${esc(ticket.panelId)}</td>
+            <td>${esc(new Date(ticket.createdAt).toLocaleString())}</td>
+          </tr>`;
+        })
+        .join('')
+    : emptyRow(5, 'No tickets recorded yet.');
+
+  return `<div class="btn-row" style="margin-bottom:14px">
+      <button class="btn small" data-action="refresh-stats">Refresh</button>
+      <span class="muted tiny">Read from data/talaba.json — not editable here.</span>
+    </div>
+    <div class="stats">
+      ${statCard('Ranked members', stats.xp.ranked, 'have earned XP')}
+      ${statCard('All-time members', stats.xp.totalMembers, 'joins tracked by the bot')}
+      ${statCard('Open tickets', stats.tickets.open, 'open or claimed')}
+      ${statCard('Total tickets', stats.tickets.total, 'all time')}
+    </div>
+    ${card('XP leaderboard', `<div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>Member</th><th>Level</th><th>XP</th><th>Voice</th></tr></thead>
+        <tbody>${leaderboard}</tbody>
+      </table></div>`, { subtitle: 'Top 10 by total XP' })}
+    ${card('Recent tickets', `<div class="table-wrap"><table>
+        <thead><tr><th>ID</th><th>Status</th><th>Opened by</th><th>Panel</th><th>Created</th></tr></thead>
+        <tbody>${tickets}</tbody>
+      </table></div>`, { subtitle: 'The 15 most recent tickets' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: advanced                                                    */
+/* ------------------------------------------------------------------ */
+
+function renderAdvanced() {
+  const meta = state.meta || {};
+  const tokenPill = `<span class="pill ${meta.tokenConfigured ? 'ok' : 'bad'}">${meta.tokenConfigured ? 'Configured' : 'Missing'}</span>`;
+  const keyPill = `<span class="pill ${meta.geminiKeyConfigured ? 'ok' : 'bad'}">${meta.geminiKeyConfigured ? 'Configured' : 'Missing'}</span>`;
+  const raw = JSON.stringify(state.config, null, 2);
+
+  return `<p class="intro">The raw editor writes the same object the bot uses. Secrets are omitted from this view; saving preserves the
+    existing token and Gemini key.</p>
+
+    ${card('Secrets', `${grid([
+      field(
+        'Bot token',
+        `<div class="row">${tokenPill}<span class="muted tiny">${esc(meta.tokenSource || 'missing')}</span></div>
+         <input class="input" id="secret-token" type="password" autocomplete="off" placeholder="Paste a new bot token to replace the saved one">`,
+        '<code>BOT_TOKEN</code> in .env overrides the file. A token change needs a bot restart.',
+      ),
+      field(
+        'Gemini API key',
+        `<div class="row">${keyPill}<span class="muted tiny">${esc(meta.geminiKeySource || 'missing')}</span></div>
+         <input class="input" id="secret-gemini" type="password" autocomplete="off" placeholder="Paste a new Gemini API key">`,
+        '<code>GEMINI_API_KEY</code> in .env overrides the file. AI moderation picks up a new key automatically.',
+      ),
+    ], 2)}
+      <div class="btn-row"><button class="btn small" data-action="save-secrets">Save secrets</button>
+        <span class="muted tiny">Leave a field blank to keep the current value.</span></div>`, {
+      subtitle: 'Write-only secret fields',
+    })}
+
+    ${card('Raw configuration JSON', `${field(
+      'config.json',
+      `<textarea class="input tall" id="raw-json" spellcheck="false">${esc(raw)}</textarea>`,
+      'Apply to form loads the JSON into the dashboard without saving. Then press “Save changes”.',
+    )}
+      <div class="btn-row">
+        <button class="btn small" data-action="raw-apply">Apply to form</button>
+        <button class="btn small ghost" data-action="raw-reset">Reset to saved</button>
+        <button class="btn small ghost" data-action="reload-disk">Reload file from disk</button>
+        <button class="btn small primary" data-action="save">Save changes</button>
+      </div>`, { subtitle: 'Everything at once, for advanced edits' })}
+
+    ${card('Environment', `<div class="table-wrap"><table>
+        <tbody>
+          <tr><th>Config file</th><td><code>${esc(meta.configPath || 'config.json')}</code></td></tr>
+          <tr><th>Token source</th><td>${esc(meta.tokenSource || 'missing')}</td></tr>
+          <tr><th>Gemini key source</th><td>${esc(meta.geminiKeySource || 'missing')}</td></tr>
+          <tr><th>Revision</th><td><code>${esc(state.revision)}</code></td></tr>
+          <tr><th>Dashboard</th><td><code>${esc((state.health && state.health.dashboard && state.health.dashboard.host) || '127.0.0.1')}:${esc((state.health && state.health.dashboard && state.health.dashboard.port) || 3000)}</code></td></tr>
+        </tbody>
+      </table></div>`, { subtitle: 'Where values come from' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Nav + status + toasts                                               */
+/* ------------------------------------------------------------------ */
+
+function renderNav() {
+  navEl.innerHTML = sections
+    .map(
+      (section) => `<button class="nav-item ${section.id === state.active ? 'active' : ''}" data-nav="${section.id}" title="${esc(section.label)}">
+        <span class="nav-icon">${section.icon}</span>
+        <span class="nav-label">${esc(section.label)}</span>
+      </button>`,
+    )
+    .join('');
+}
+
+function renderActive(resetScroll = false) {
+  const section = sections.find((entry) => entry.id === state.active) || sections[0];
+  if (!state.config) return;
+
+  document.getElementById('section-title').textContent = section.label;
+  document.getElementById('section-subtitle').textContent = section.subtitle || '';
+
+  const scrollY = window.scrollY;
+  contentEl.innerHTML = section.render();
+  updatePreviews();
+  updateDirty();
+
+  if (resetScroll) {
+    window.scrollTo({ top: 0 });
+  } else {
+    window.scrollTo(0, scrollY);
+  }
+}
+
+function redraw() {
+  renderNav();
+  renderActive();
+}
+
+function setActive(id, updateHash) {
+  if (!sections.some((section) => section.id === id)) return;
+  state.active = id;
+  if (updateHash && window.location.hash !== `#${id}`) {
+    history.replaceState(null, '', `#${id}`);
+  }
+  renderNav();
+  renderActive(true);
+}
+
+function updateMetaUi() {
+  const pathEl = document.getElementById('config-path');
+  const meta = state.meta || {};
+  pathEl.textContent = `${meta.configPath || 'config.json'} · token: ${meta.tokenSource || 'missing'}`;
+  updateStatus();
+}
+
+function updateStatus() {
+  const statusEl = document.getElementById('bot-status');
+  const health = state.health;
+  if (!statusEl || !health) return;
+
+  const ready = Boolean(health.bot && health.bot.ready);
+  statusEl.classList.toggle('online', ready);
+  statusEl.classList.toggle('offline', !ready);
+  const text = statusEl.querySelector('.status-text');
+  if (text) {
+    const guild = health.guild && health.guild.name ? ` · ${health.guild.name}` : '';
+    text.textContent = ready ? `Online${guild}` : 'Bot offline';
+  }
+}
+
+function toast(message, type = 'info', timeout = 4500) {
+  const node = document.createElement('div');
+  node.className = `toast ${type}`;
+  node.textContent = message;
+  toastEl.appendChild(node);
+  setTimeout(() => {
+    node.style.opacity = '0';
+    node.style.transform = 'translateY(4px)';
+    node.style.transition = 'opacity .2s, transform .2s';
+    setTimeout(() => node.remove(), 220);
+  }, timeout);
+}

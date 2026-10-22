@@ -423,62 +423,75 @@ function migratePanels(raw: any): { panels: RolePanel[] } {
 
 let config: BotConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
 
+/** Marker used by the dashboard instead of real secrets in API responses. */
+export const REDACTED_VALUE = '__REDACTED__';
+
+/**
+ * Merge a raw config object with the defaults and normalise every section.
+ * Shared by the startup loader and the dashboard so a config saved from the
+ * browser is byte-for-byte equivalent to one written by the bot itself.
+ */
+function normalizeConfig(parsed: any): BotConfig {
+  const source = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  const legacyPerMessage = source.xp?.perMessage;
+  const legacyPerVoice = source.xp?.perVoiceMinute;
+
+  return {
+    ...JSON.parse(JSON.stringify(DEFAULT_CONFIG)),
+    ...source,
+    reactionRoles: {
+      ...DEFAULT_CONFIG.reactionRoles,
+      ...(source.reactionRoles || {}),
+      mappings: { ...(source.reactionRoles?.mappings || {}) },
+    },
+    roles: migratePanels(source.roles),
+    levelRoles: { ...(source.levelRoles || {}) },
+    xp: {
+      perMessageMin: source.xp?.perMessageMin ?? legacyPerMessage ?? DEFAULT_CONFIG.xp.perMessageMin,
+      perMessageMax: source.xp?.perMessageMax ?? legacyPerMessage ?? DEFAULT_CONFIG.xp.perMessageMax,
+      cooldownSeconds: source.xp?.cooldownSeconds ?? DEFAULT_CONFIG.xp.cooldownSeconds,
+      perVoiceMinuteMin:
+        source.xp?.perVoiceMinuteMin ?? legacyPerVoice ?? DEFAULT_CONFIG.xp.perVoiceMinuteMin,
+      perVoiceMinuteMax:
+        source.xp?.perVoiceMinuteMax ?? legacyPerVoice ?? DEFAULT_CONFIG.xp.perVoiceMinuteMax,
+      noXpChannels: [...(source.xp?.noXpChannels || [])],
+      xpChannel: source.xp?.xpChannel || '',
+      ignoreBots: source.xp?.ignoreBots ?? DEFAULT_CONFIG.xp.ignoreBots,
+    },
+    channels: { ...DEFAULT_CONFIG.channels, ...(source.channels || {}) },
+    logging: {
+      ...DEFAULT_CONFIG.logging,
+      ...(source.logging || {}),
+      categories: {
+        ...DEFAULT_CONFIG.logging.categories,
+        ...(source.logging?.categories || {}),
+      },
+    },
+    verification: { ...DEFAULT_CONFIG.verification, ...(source.verification || {}) },
+    automod: {
+      ...DEFAULT_CONFIG.automod,
+      ...(source.automod || {}),
+      aiModeration: {
+        ...DEFAULT_CONFIG.automod.aiModeration,
+        ...(source.automod?.aiModeration || {}),
+      },
+    },
+    autoReactions: Array.isArray(source.autoReactions) ? source.autoReactions : [],
+    welcome: { ...DEFAULT_CONFIG.welcome, ...(source.welcome || {}) },
+    goodbye: { ...DEFAULT_CONFIG.goodbye, ...(source.goodbye || {}) },
+    tickets: {
+      ...DEFAULT_CONFIG.tickets,
+      ...(source.tickets || {}),
+      panels: Array.isArray(source.tickets?.panels) ? source.tickets.panels : [],
+    },
+  };
+}
+
 export function loadConfig(): BotConfig {
   try {
     if (fs.existsSync(configPath)) {
       const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      const legacyPerMessage = parsed.xp?.perMessage;
-      const legacyPerVoice = parsed.xp?.perVoiceMinute;
-
-      config = {
-        ...JSON.parse(JSON.stringify(DEFAULT_CONFIG)),
-        ...parsed,
-        reactionRoles: {
-          ...DEFAULT_CONFIG.reactionRoles,
-          ...(parsed.reactionRoles || {}),
-          mappings: { ...(parsed.reactionRoles?.mappings || {}) },
-        },
-        roles: migratePanels(parsed.roles),
-        levelRoles: { ...(parsed.levelRoles || {}) },
-        xp: {
-          perMessageMin: parsed.xp?.perMessageMin ?? legacyPerMessage ?? DEFAULT_CONFIG.xp.perMessageMin,
-          perMessageMax: parsed.xp?.perMessageMax ?? legacyPerMessage ?? DEFAULT_CONFIG.xp.perMessageMax,
-          cooldownSeconds: parsed.xp?.cooldownSeconds ?? DEFAULT_CONFIG.xp.cooldownSeconds,
-          perVoiceMinuteMin:
-            parsed.xp?.perVoiceMinuteMin ?? legacyPerVoice ?? DEFAULT_CONFIG.xp.perVoiceMinuteMin,
-          perVoiceMinuteMax:
-            parsed.xp?.perVoiceMinuteMax ?? legacyPerVoice ?? DEFAULT_CONFIG.xp.perVoiceMinuteMax,
-          noXpChannels: [...(parsed.xp?.noXpChannels || [])],
-          xpChannel: parsed.xp?.xpChannel || '',
-          ignoreBots: parsed.xp?.ignoreBots ?? DEFAULT_CONFIG.xp.ignoreBots,
-        },
-        channels: { ...DEFAULT_CONFIG.channels, ...(parsed.channels || {}) },
-        logging: {
-          ...DEFAULT_CONFIG.logging,
-          ...(parsed.logging || {}),
-          categories: {
-            ...DEFAULT_CONFIG.logging.categories,
-            ...(parsed.logging?.categories || {}),
-          },
-        },
-        verification: { ...DEFAULT_CONFIG.verification, ...(parsed.verification || {}) },
-        automod: {
-          ...DEFAULT_CONFIG.automod,
-          ...(parsed.automod || {}),
-          aiModeration: {
-            ...DEFAULT_CONFIG.automod.aiModeration,
-            ...(parsed.automod?.aiModeration || {}),
-          },
-        },
-        autoReactions: Array.isArray(parsed.autoReactions) ? parsed.autoReactions : [],
-        welcome: { ...DEFAULT_CONFIG.welcome, ...(parsed.welcome || {}) },
-        goodbye: { ...DEFAULT_CONFIG.goodbye, ...(parsed.goodbye || {}) },
-        tickets: {
-          ...DEFAULT_CONFIG.tickets,
-          ...(parsed.tickets || {}),
-          panels: Array.isArray(parsed.tickets?.panels) ? parsed.tickets.panels : [],
-        },
-      };
+      config = normalizeConfig(parsed);
     }
   } catch (err) {
     console.error('Failed to load config.json:', err);
@@ -488,6 +501,225 @@ export function loadConfig(): BotConfig {
 }
 
 export function getConfig(): BotConfig {
+  return config;
+}
+
+/** Absolute path of the JSON file the bot reads and writes. */
+export function getConfigPath(): string {
+  return configPath;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dashboard save sanitising                                           */
+/* ------------------------------------------------------------------ */
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function asBool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function asNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function asInt(value: unknown, fallback: number, min: number, max: number): number {
+  return Math.round(asNumber(value, fallback, min, max));
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const cleaned = value
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+  return [...new Set(cleaned)];
+}
+
+/**
+ * Coerce values written by the dashboard into the shapes the bot expects.
+ * The UI already produces correct types; this protects the raw JSON editor
+ * (and hand-edited files saved through it) from breaking the running bot.
+ */
+function sanitizeConfig(cfg: BotConfig): void {
+  cfg.guildId = asString(cfg.guildId);
+  cfg.clientId = asString(cfg.clientId);
+  cfg.token = asString(cfg.token);
+
+  cfg.xp.perMessageMin = asInt(cfg.xp.perMessageMin, 15, 0, 10_000);
+  cfg.xp.perMessageMax = asInt(cfg.xp.perMessageMax, 25, cfg.xp.perMessageMin, 10_000);
+  cfg.xp.cooldownSeconds = asInt(cfg.xp.cooldownSeconds, 60, 0, 86_400);
+  cfg.xp.perVoiceMinuteMin = asInt(cfg.xp.perVoiceMinuteMin, 5, 0, 10_000);
+  cfg.xp.perVoiceMinuteMax = asInt(cfg.xp.perVoiceMinuteMax, 8, cfg.xp.perVoiceMinuteMin, 10_000);
+  cfg.xp.noXpChannels = asStringArray(cfg.xp.noXpChannels);
+  cfg.xp.xpChannel = asString(cfg.xp.xpChannel);
+  cfg.xp.ignoreBots = asBool(cfg.xp.ignoreBots, true);
+
+  cfg.levelRoles = Object.fromEntries(
+    Object.entries(cfg.levelRoles || {})
+      .filter(([level, roleId]) => /^\d+$/.test(level) && typeof roleId === 'string' && roleId !== '')
+      .map(([level, roleId]) => [String(parseInt(level, 10)), roleId]),
+  );
+
+  cfg.channels.levelUp = asString(cfg.channels.levelUp);
+  cfg.channels.logs = asString(cfg.channels.logs);
+  cfg.channels.levelUpMessage = asString(
+    cfg.channels.levelUpMessage,
+    '🎉 Congratulations {user}, you have reached **level {level}**!',
+  );
+
+  cfg.logging.enabled = asBool(cfg.logging.enabled, true);
+  cfg.logging.channelId = asString(cfg.logging.channelId);
+  for (const key of Object.keys(cfg.logging.categories) as (keyof LoggingCategoryConfig)[]) {
+    cfg.logging.categories[key] = asBool(cfg.logging.categories[key], true);
+  }
+
+  cfg.verification.messageId = asString(cfg.verification.messageId);
+  cfg.verification.channelId = asString(cfg.verification.channelId);
+  cfg.verification.roleId = asString(cfg.verification.roleId);
+  cfg.verification.title = asString(cfg.verification.title, '✅ Verification');
+  cfg.verification.description = asString(cfg.verification.description);
+  cfg.verification.showUnverify = asBool(cfg.verification.showUnverify, true);
+
+  cfg.automod.blockUrls = asBool(cfg.automod.blockUrls, true);
+  cfg.automod.blockGifs = asBool(cfg.automod.blockGifs, true);
+  cfg.automod.blockCaps = asBool(cfg.automod.blockCaps, true);
+  cfg.automod.gifWhitelistRoles = asStringArray(cfg.automod.gifWhitelistRoles);
+  cfg.automod.bypassRoles = asStringArray(cfg.automod.bypassRoles);
+  cfg.automod.ignoredChannels = asStringArray(cfg.automod.ignoredChannels);
+  cfg.automod.alertRoleIds = asStringArray(cfg.automod.alertRoleIds);
+  cfg.automod.attachmentOnlyChannels = asStringArray(cfg.automod.attachmentOnlyChannels);
+  cfg.automod.modLogsChannelId = asString(cfg.automod.modLogsChannelId);
+  cfg.automod.capsMinLength = asInt(cfg.automod.capsMinLength, 10, 1, 500);
+  cfg.automod.capsMaxPercent = asInt(cfg.automod.capsMaxPercent, 70, 1, 100);
+
+  const ai = cfg.automod.aiModeration;
+  ai.enabled = asBool(ai.enabled, false);
+  ai.model = asString(ai.model, 'gemini-3.8-live');
+  ai.apiKey = asString(ai.apiKey);
+  ai.systemPrompt = asString(ai.systemPrompt);
+  ai.categories = asStringArray(ai.categories);
+  ai.thinkingLevel = asString(ai.thinkingLevel, 'low');
+  ai.minLength = asInt(ai.minLength, 8, 0, 2_000);
+  ai.confidenceThreshold = asNumber(ai.confidenceThreshold, 0.7, 0, 1);
+
+  cfg.autoReactions = (Array.isArray(cfg.autoReactions) ? cfg.autoReactions : [])
+    .map((entry) => ({
+      channelId: asString(entry?.channelId),
+      emojis: asStringArray(entry?.emojis),
+    }))
+    .filter((entry) => entry.channelId !== '');
+
+  cfg.welcome.channelId = asString(cfg.welcome.channelId);
+  cfg.welcome.message = asString(cfg.welcome.message);
+  cfg.welcome.welcomeImageMessage = asString(cfg.welcome.welcomeImageMessage);
+  cfg.welcome.backgroundImage = asString(cfg.welcome.backgroundImage, 'assets/bg.jpg');
+  cfg.welcome.enabled = asBool(cfg.welcome.enabled, false);
+
+  cfg.goodbye.channelId = asString(cfg.goodbye.channelId);
+  cfg.goodbye.message = asString(cfg.goodbye.message);
+  cfg.goodbye.enabled = asBool(cfg.goodbye.enabled, false);
+
+  cfg.roles.panels = (Array.isArray(cfg.roles.panels) ? cfg.roles.panels : []).map((panel, index) => ({
+    ...panel,
+    id: asString(panel.id) || `p${index + 1}`,
+    name: asString(panel.name) || `Panel ${index + 1}`,
+    messageId: asString(panel.messageId),
+    channelId: asString(panel.channelId),
+    title: asString(panel.title, '🎭 Self-Assign Roles'),
+    description: asString(panel.description),
+    overrideRoles: asBool(panel.overrideRoles, false),
+    buttons: (Array.isArray(panel.buttons) ? panel.buttons : [])
+      .slice(0, 25)
+      .map((button) => ({
+        roleId: asString(button?.roleId),
+        label: asString(button?.label).slice(0, 80),
+        emoji: asString(button?.emoji),
+        style: asInt(button?.style, 2, 1, 4),
+      }))
+      .filter((button) => button.roleId !== ''),
+  }));
+
+  cfg.tickets.categoryId = asString(cfg.tickets.categoryId);
+  cfg.tickets.logChannelId = asString(cfg.tickets.logChannelId);
+  cfg.tickets.defaultStaffRoles = asStringArray(cfg.tickets.defaultStaffRoles);
+  cfg.tickets.defaultPingRoles = asStringArray(cfg.tickets.defaultPingRoles);
+  cfg.tickets.panels = (Array.isArray(cfg.tickets.panels) ? cfg.tickets.panels : []).map((panel, index) => ({
+    ...panel,
+    id: asString(panel.id) || `t${index + 1}`,
+    name: asString(panel.name) || `Ticket panel ${index + 1}`,
+    channelId: asString(panel.channelId),
+    messageId: asString(panel.messageId),
+    title: asString(panel.title, '🎫 Support'),
+    description: asString(panel.description),
+    buttonLabel: asString(panel.buttonLabel, 'Open Ticket').slice(0, 80),
+    buttonEmoji: asString(panel.buttonEmoji),
+    buttonStyle: asInt(panel.buttonStyle, 1, 1, 4),
+    categoryId: asString(panel.categoryId) || cfg.tickets.categoryId,
+    staffRoles: asStringArray(panel.staffRoles),
+    pingRoles: asStringArray(panel.pingRoles),
+    welcomeMessage: asString(panel.welcomeMessage),
+    pingOnCreate: asBool(panel.pingOnCreate, true),
+    autoCloseHours: asInt(panel.autoCloseHours, 0, 0, 8760),
+    transcriptsEnabled: asBool(panel.transcriptsEnabled, true),
+    transcriptChannelId: asString(panel.transcriptChannelId),
+    formFields: (Array.isArray(panel.formFields) ? panel.formFields : []).map((field, fieldIndex) => {
+      const minLength =
+        typeof field?.minLength === 'number' ? asInt(field.minLength, 0, 0, 4000) : undefined;
+      const maxLength =
+        typeof field?.maxLength === 'number' ? asInt(field.maxLength, 1, 1, 4000) : undefined;
+      return {
+        ...field,
+        id: asString(field?.id) || `field_${fieldIndex + 1}`,
+        label: asString(field?.label, `Field ${fieldIndex + 1}`).slice(0, 45),
+        placeholder: asString(field?.placeholder),
+        type: field?.type === 'paragraph' ? ('paragraph' as const) : ('short' as const),
+        required: asBool(field?.required, true),
+        maxLength:
+          maxLength !== undefined && minLength !== undefined ? Math.max(maxLength, minLength) : maxLength,
+        minLength,
+      };
+    }),
+  }));
+}
+
+/**
+ * Replace the in-memory config and persist it.
+ *
+ * The dashboard sends the config without secrets (`token`, Gemini API key).
+ * When `preserveSecrets` is true (the default), missing/blank/redacted secret
+ * values keep their current on-disk value instead of being wiped.
+ *
+ * Returns the normalised config that is now live. Changes made this way take
+ * effect immediately — the bot reads `getConfig()` on every event.
+ */
+export function replaceConfig(raw: unknown, options: { preserveSecrets?: boolean } = {}): BotConfig {
+  const source: any = raw && typeof raw === 'object' && !Array.isArray(raw) ? JSON.parse(JSON.stringify(raw)) : {};
+
+  if (options.preserveSecrets !== false) {
+    if (typeof source.token !== 'string' || source.token.trim() === '' || source.token === REDACTED_VALUE) {
+      source.token = config.token;
+    }
+    if (!source.automod || typeof source.automod !== 'object' || Array.isArray(source.automod)) {
+      source.automod = {};
+    }
+    const ai = source.automod.aiModeration;
+    if (!ai || typeof ai !== 'object' || Array.isArray(ai)) {
+      source.automod.aiModeration = {};
+    }
+    const apiKey = source.automod.aiModeration.apiKey;
+    if (typeof apiKey !== 'string' || apiKey.trim() === '' || apiKey === REDACTED_VALUE) {
+      source.automod.aiModeration.apiKey = config.automod.aiModeration.apiKey;
+    }
+  }
+
+  config = normalizeConfig(source);
+  sanitizeConfig(config);
+  saveConfig();
   return config;
 }
 

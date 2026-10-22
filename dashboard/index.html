@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TALABA &lt;3 · Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="login" class="login-screen hidden">
+      <form id="login-form" class="login-card" autocomplete="on">
+        <div class="login-mark">T</div>
+        <h1>TALABA &lt;3 Dashboard</h1>
+        <p class="muted">Sign in to edit the bot configuration.</p>
+        <input
+          id="login-password"
+          class="input"
+          type="password"
+          placeholder="Dashboard password"
+          autocomplete="current-password"
+          required
+        />
+        <button class="btn primary wide" type="submit">Sign in</button>
+        <p id="login-error" class="error" role="alert"></p>
+      </form>
+    </div>
+
+    <div id="app" class="app hidden">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">T</span>
+          <div>
+            <strong>TALABA &lt;3</strong>
+            <small>Bot dashboard</small>
+          </div>
+        </div>
+
+        <nav id="nav" class="nav" aria-label="Sections"></nav>
+
+        <div class="sidebar-footer">
+          <div id="bot-status" class="status">
+            <span class="dot"></span>
+            <span class="status-text">Connecting…</span>
+          </div>
+          <div id="config-path" class="tiny muted"></div>
+          <button class="btn ghost small" data-action="logout">Sign out</button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="topbar-title">
+            <h1 id="section-title">Overview</h1>
+            <p id="section-subtitle" class="muted"></p>
+          </div>
+          <div class="topbar-actions">
+            <span id="dirty-indicator" class="pill warn hidden">Unsaved changes</span>
+            <button class="btn ghost" data-action="reload">Reload</button>
+            <button class="btn primary" data-action="save">Save changes</button>
+          </div>
+        </header>
+
+        <div id="content" class="content"></div>
+      </main>
+    </div>
+
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

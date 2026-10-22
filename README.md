@@ -12,7 +12,48 @@ npm run dev            # starts the bot (tsx watch, no build needed)
 
 Settings can also live in `config.json` (`token`, `clientId`, `guildId`); environment variables
 take precedence. Every other setting is managed from Discord with the `/config`, `/levels`, `/xp`,
-`/roles`, `/verify` and `/tickets` commands, which write back to `config.json`.
+`/roles`, `/verify` and `/tickets` commands, or from the web dashboard described below — both write
+back to `config.json`.
+
+## Web dashboard
+
+The bot starts a local configuration dashboard on **http://127.0.0.1:3000**:
+
+```bash
+npm start        # or npm run dev
+# then open http://127.0.0.1:3000
+```
+
+It is served from inside the bot process, so **saving applies changes immediately** (no restart) and
+writes the same `config.json` that slash commands use.
+
+| What you can edit | Details |
+| --- | --- |
+| XP & levels | Message/voice rates, cooldown, XP channels, level reward roles |
+| Channels & logging | Level-up channel + template, log channel, per-event log categories |
+| Welcome & goodbye | Channel, messages, card text, background path, **send test** button |
+| AutoMod & AI | URL/GIF/CAPS filters, thresholds, exemptions, Gemini prompt/model/threshold, **dry-run classifier** |
+| Role panels | Create/edit/delete panels and buttons, override mode, **post/update the Discord message** |
+| Reaction roles & verification | Channel, message, emoji→role mappings, verified role |
+| Tickets | Panels, button styling, categories, staff/ping roles, form fields, auto-close, transcripts |
+| Auto-reactions | Channel → emoji list |
+| Data & stats | XP leaderboard, tracked members, recent/open tickets |
+| Advanced | Write-only bot token / Gemini key fields, raw JSON editor |
+
+Environment variables (all optional):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DASHBOARD_ENABLED` | `true` | Set to `false` to disable the dashboard |
+| `DASHBOARD_HOST` | `127.0.0.1` | Interface to bind. Non-loopback hosts require a password |
+| `DASHBOARD_PORT` | `3000` | HTTP port |
+| `DASHBOARD_PASSWORD` | *(empty)* | Set to require a login (12-hour session cookie) |
+
+The token and Gemini API key are never sent to the browser. Secrets are edited through write-only
+fields and can be overwritten by `BOT_TOKEN` / `GEMINI_API_KEY` in `.env`. The dashboard has no
+Discord login — it is a host-local admin tool. Run it on a machine you trust and use a password if
+you expose the port.
+
 
 ## Scripts
 
@@ -40,6 +81,7 @@ take precedence. Every other setting is managed from Discord with the `/config`,
 | Reaction roles | Optional — react to a message to get a role |
 | Verification | Click a button to receive the "verified" role |
 | Rank card fallback | If the canvas fails, a text embed is sent instead |
+| Web dashboard | Local UI at `http://127.0.0.1:3000` to edit every setting, post role/ticket panels, and test welcome/AI moderation |
 
 ## Rank card & leaderboard images
 

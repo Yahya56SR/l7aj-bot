@@ -21,6 +21,7 @@ import { handleReactionAdd, handleReactionRemove } from './events/messageReactio
 import { handleGuildMemberAdd, handleGuildMemberRemove } from './events/guildMember';
 import { registerLoggingEvents } from './events/logging';
 import { logCommandUsage } from './utils/logger';
+import { startDashboard } from './dashboard/server';
 
 dotenv.config();
 loadConfig();
@@ -239,6 +240,7 @@ process.on('SIGINT', async () => {
   console.log('Shutting down...');
   if (voiceTickInterval) clearInterval(voiceTickInterval);
   if (ticketSweepInterval) clearInterval(ticketSweepInterval);
+  dashboardServer?.close();
   client.destroy();
   process.exit(0);
 });
@@ -247,11 +249,16 @@ process.on('SIGTERM', async () => {
   console.log('Shutting down...');
   if (voiceTickInterval) clearInterval(voiceTickInterval);
   if (ticketSweepInterval) clearInterval(ticketSweepInterval);
+  dashboardServer?.close();
   client.destroy();
   process.exit(0);
 });
 
 initDb();
+
+// Start the local configuration dashboard. This happens before Discord login
+// so settings can still be fixed when the token or intents are wrong.
+const dashboardServer = startDashboard(client);
 
 const commands = [
   rankCmd.data,
