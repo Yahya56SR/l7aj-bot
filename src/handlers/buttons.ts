@@ -20,10 +20,12 @@ export const MAX_BUTTONS = 25;
  */
 export function buildPanelRows(buttons: PanelButton[]): ActionRowBuilder<ButtonBuilder>[] {
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  // Discord allows at most 5 action rows of 5 buttons each.
+  const limited = buttons.slice(0, MAX_BUTTONS);
 
-  for (let i = 0; i < buttons.length; i += BUTTONS_PER_ROW) {
+  for (let i = 0; i < limited.length; i += BUTTONS_PER_ROW) {
     const row = new ActionRowBuilder<ButtonBuilder>();
-    for (const entry of buttons.slice(i, i + BUTTONS_PER_ROW)) {
+    for (const entry of limited.slice(i, i + BUTTONS_PER_ROW)) {
       const styleValue = Number.isInteger(entry.style) && entry.style >= 1 && entry.style <= 4
         ? entry.style
         : ButtonStyle.Secondary;

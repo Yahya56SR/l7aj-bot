@@ -1,0 +1,10 @@
+{
+  "mcp": {
+    "servers": {
+      "context7": {
+        "type": "remote",
+        "url": "https://gemini-api-docs-mcp.dev"
+      }
+    }
+  }
+}

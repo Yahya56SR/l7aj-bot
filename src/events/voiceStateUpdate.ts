@@ -39,8 +39,10 @@ export function handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceStat
 
   const now = Date.now();
 
+  const changedChannel = oldState.channelId !== newState.channelId;
+
   // Left a voice channel, or moved to a different one
-  if (oldState.channelId && (!newState.channelId || oldState.channelId !== newState.channelId)) {
+  if (oldState.channelId && changedChannel) {
     const joinTs = voiceSessions.get(userId);
     if (joinTs) {
       const minutes = Math.floor((now - joinTs) / 60000);
@@ -49,8 +51,10 @@ export function handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceStat
     }
   }
 
-  // Joined a voice channel
-  if (!oldState.channelId && newState.channelId && newState.member?.user) {
+  // Joined a voice channel, or moved to a new one: start a fresh session.
+  // Without this a channel move would end the session and stop all further
+  // voice XP until the member left and rejoined.
+  if (changedChannel && newState.channelId && newState.member?.user) {
     voiceSessions.set(userId, now);
   }
 }

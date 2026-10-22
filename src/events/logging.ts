@@ -113,7 +113,7 @@ export function registerLoggingEvents(client: Client): void {
           ? oldMember.guild.members.cache.get(oldMember.id) ?? oldMember
           : oldMember;
 
-      const oldRoles = memberRolesCache.get(oldMember.id) ?? new Set();
+      const oldRoles = memberRolesCache.get(oldMember.id) ?? new Set(oldFull.roles.cache.keys());
       const newRoles = new Set(newMember.roles.cache.keys());
 
       const addedRoles: Role[] = [];
@@ -127,7 +127,12 @@ export function registerLoggingEvents(client: Client): void {
       }
       for (const roleId of oldRoles) {
         if (!newRoles.has(roleId)) {
-          const role = newMember.roles.cache.get(roleId);
+          // A removed role is no longer in the member's cache, so resolve it
+          // from the guild (or the old snapshot) instead.
+          const role =
+            newMember.guild.roles.cache.get(roleId) ??
+            oldFull.roles.cache.get(roleId) ??
+            null;
           if (role) removedRoles.push(role);
         }
       }
@@ -192,6 +197,7 @@ export function registerLoggingEvents(client: Client): void {
   client.on(
     'guildMemberRemove',
     (member: GuildMember | PartialGuildMember) => {
+      memberRolesCache.delete(member.id);
       logMemberLeave(member as GuildMember, client as unknown as LoggableClient).catch(
         (err) => console.error('[Logging] guildMemberRemove error:', err),
       );

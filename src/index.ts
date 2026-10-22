@@ -5,7 +5,7 @@ import { getConfig, loadConfig } from './config';
 import { initDb, initializeTotalMembers } from './db';
 import { registerCommands } from './handlers/registerCommands';
 import { handleButtonInteraction } from './handlers/buttons';
-import { handleTicketButton, handleTicketModal } from './handlers/tickets';
+import { handleTicketButton, handleTicketModal, runTicketAutoClose } from './handlers/tickets';
 import * as rankCmd from './commands/rank';
 import * as leaderboardCmd from './commands/leaderboard';
 import * as reactionRolesCmd from './commands/reactionroles';
@@ -52,6 +52,7 @@ client.commands.set(ticketsCmd.data.name, ticketsCmd);
 registerLoggingEvents(client);
 
 let voiceTickInterval: ReturnType<typeof setInterval> | null = null;
+let ticketSweepInterval: ReturnType<typeof setInterval> | null = null;
 
 client.on('ready', () => {
   console.log(`Logged in as ${client.user?.tag} (${client.user?.id})`);
@@ -61,7 +62,10 @@ client.on('ready', () => {
   if (guild) {
     initializeTotalMembers(guild.memberCount);
   }
-  // Award voice XP every minute to users still in VC
+  // Award voice XP every minute to users still in VC.
+  // `ready` can fire again after a reconnect, so replace any old interval
+  // instead of stacking a second one (which would double-award XP).
+  if (voiceTickInterval) clearInterval(voiceTickInterval);
   voiceTickInterval = setInterval(async () => {
     try {
       await handleVoiceTick(client);
@@ -69,6 +73,17 @@ client.on('ready', () => {
       console.error('Voice tick error:', err);
     }
   }, 60 * 1000);
+
+  // Close tickets whose panel has autoCloseHours configured and that have been
+  // idle longer than that. Runs every 5 minutes.
+  if (ticketSweepInterval) clearInterval(ticketSweepInterval);
+  ticketSweepInterval = setInterval(async () => {
+    try {
+      await runTicketAutoClose(client);
+    } catch (err) {
+      console.error('Ticket auto-close error:', err);
+    }
+  }, 5 * 60 * 1000);
 });
 
 client.on('messageCreate', async (message) => {
@@ -223,6 +238,7 @@ client.on('interactionCreate', async (interaction) => {
 process.on('SIGINT', async () => {
   console.log('Shutting down...');
   if (voiceTickInterval) clearInterval(voiceTickInterval);
+  if (ticketSweepInterval) clearInterval(ticketSweepInterval);
   client.destroy();
   process.exit(0);
 });
@@ -230,6 +246,7 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   console.log('Shutting down...');
   if (voiceTickInterval) clearInterval(voiceTickInterval);
+  if (ticketSweepInterval) clearInterval(ticketSweepInterval);
   client.destroy();
   process.exit(0);
 });
@@ -256,14 +273,14 @@ async function start(): Promise<void> {
 
   if (!token || token === 'YOUR_BOT_TOKEN_HERE') {
     console.error('\n❌ No bot token configured.');
-    console.error('   Run "npm run setup" to fill in config.json.\n');
+    console.error('   Add BOT_TOKEN to .env, or set "token" in config.json.\n');
     process.exitCode = 1;
     return;
   }
 
   if (!clientId || !guildId || clientId === 'YOUR_APPLICATION_CLIENT_ID_HERE') {
     console.error('\n❌ Client ID or Guild ID is missing.');
-    console.error('   Run "npm run setup" to fill in config.json.\n');
+    console.error('   Add CLIENT_ID and GUILD_ID to .env, or set them in config.json.\n');
     process.exitCode = 1;
     return;
   }
@@ -284,8 +301,8 @@ async function start(): Promise<void> {
       console.error('   Fix:');
       console.error('     1. Developer Portal → your app → Bot → "Reset Token"');
       console.error('     2. Copy the BOT TOKEN (not the client secret)');
-      console.error('     3. Run "npm run setup" and paste it in');
-      console.error('     4. Run "npm run doctor" to verify\n');
+      console.error('     3. Put it in .env (BOT_TOKEN=...) or config.json ("token")');
+      console.error('     4. Restart the bot\n');
     } else if (err?.status === 403) {
       console.error('\n❌ Missing Access (403). The bot is not in that server.');
       console.error('   Invite it with the link from Developer Portal → Bot page.\n');

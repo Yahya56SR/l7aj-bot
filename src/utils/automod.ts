@@ -40,6 +40,18 @@ const URL_REGEX = /https?:\/\/[^\s]+/gi;
 /** Regex to match GIF URLs (common GIF hosting domains) */
 const GIF_URL_REGEX = /https?:\/\/(?:[^\s]*\.)?(?:giphy|tenor|imgur|media\.giphy|media\.tenor|i\.giphy|i\.imgur)\.(?:com|media|gif|gifv|webp)(?:\/[^\s]*)?/gi;
 
+/**
+ * `RegExp.prototype.test` on a global regex advances `lastIndex`, so calling it
+ * repeatedly on different messages would skip matches (every other message
+ * would slip through automod). Always reset the cursor before and after.
+ */
+function regexTest(regex: RegExp, value: string): boolean {
+  regex.lastIndex = 0;
+  const matched = regex.test(value);
+  regex.lastIndex = 0;
+  return matched;
+}
+
 /** Check if a message attachment is a GIF */
 function isGifAttachment(message: Message): boolean {
   for (const attachment of message.attachments.values()) {
@@ -54,12 +66,12 @@ function isGifAttachment(message: Message): boolean {
 
 /** Check if message content contains a GIF URL */
 function hasGifUrl(content: string): boolean {
-  return GIF_URL_REGEX.test(content);
+  return regexTest(GIF_URL_REGEX, content);
 }
 
 /** Check if message content contains any URL */
 function hasUrl(content: string): boolean {
-  return URL_REGEX.test(content);
+  return regexTest(URL_REGEX, content);
 }
 
 /** Check if message has excessive caps */

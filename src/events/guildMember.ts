@@ -8,6 +8,10 @@ import { getTotalMemberCount, incrementTotalMembers } from '../db';
  */
 export async function handleGuildMemberAdd(member: GuildMember | PartialGuildMember): Promise<void> {
   try {
+    // Track the all-time member count even when welcome messages are disabled,
+    // so {memberCount} stays correct if welcome is enabled later.
+    const totalMemberCount = incrementTotalMembers();
+
     const config = getConfig();
     const welcomeConfig = config.welcome;
 
@@ -16,9 +20,6 @@ export async function handleGuildMemberAdd(member: GuildMember | PartialGuildMem
     const channel = member.guild.channels.cache.get(welcomeConfig.channelId);
     if (!channel || !channel.isTextBased()) return;
 
-    // Increment and get total member count (includes those who left/kicked/banned)
-    const totalMemberCount = incrementTotalMembers();
-    
     // Get user's avatar URL (high res)
     const avatarUrl = member.user.displayAvatarURL({ extension: 'png', size: 512 });
 
@@ -65,10 +66,11 @@ export async function handleGuildMemberRemove(member: GuildMember | PartialGuild
     // Get current total member count (includes this member who just left)
     const totalMemberCount = getTotalMemberCount();
 
-    // Prepare goodbye message
+    // Prepare goodbye message (partial members may not expose `user`)
+    const username = member.user?.username ?? member.id;
     const messageContent = goodbyeConfig.message
       .replace(/{user}/g, `<@${member.id}>`)
-      .replace(/{username}/g, member.user.username)
+      .replace(/{username}/g, username)
       .replace(/{server}/g, member.guild.name)
       .replace(/{memberCount}/g, totalMemberCount.toString());
 

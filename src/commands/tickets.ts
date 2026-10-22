@@ -122,6 +122,32 @@ export const data = new SlashCommandBuilder()
             o
               .setName('transcripts')
               .setDescription('Enable transcripts when tickets close'),
+          )
+          .addRoleOption((o) =>
+            o
+              .setName('add-staff-role')
+              .setDescription('Give a role access to this panel’s ticket channels'),
+          )
+          .addRoleOption((o) =>
+            o
+              .setName('remove-staff-role')
+              .setDescription('Remove a role from this panel’s staff roles'),
+          )
+          .addRoleOption((o) =>
+            o
+              .setName('add-ping-role')
+              .setDescription('Role to ping when a ticket is created'),
+          )
+          .addRoleOption((o) =>
+            o
+              .setName('remove-ping-role')
+              .setDescription('Stop pinging a role when a ticket is created'),
+          )
+          .addChannelOption((o) =>
+            o
+              .setName('transcript-channel')
+              .setDescription('Channel where closed-ticket transcripts are posted')
+              .addChannelTypes(ChannelType.GuildText),
           ),
       ),
   )
@@ -254,7 +280,7 @@ async function createPanel(interaction: ChatInputCommandInteraction): Promise<vo
   const title = interaction.options.getString('title') || `🎫 ${name}`;
   const description =
     interaction.options.getString('description') || 'Click the button below to open a support ticket.';
-  const buttonLabel = interaction.options.getString('button-label') || 'Open Ticket';
+  const buttonLabel = (interaction.options.getString('button-label') || 'Open Ticket').slice(0, 80);
   const buttonEmoji = interaction.options.getString('button-emoji') || '🎫';
 
   const channel = await guild.channels.fetch(channelOption.id).catch(() => null);
@@ -353,7 +379,7 @@ async function createPanel(interaction: ChatInputCommandInteraction): Promise<vo
 
 async function deletePanel(interaction: ChatInputCommandInteraction): Promise<void> {
   const guild = interaction.guild!;
-  const panel = resolvePanel(interaction.options.getString('panel', true));
+  const panel = await requirePanel(interaction);
   if (!panel) return;
 
   try {
@@ -406,15 +432,31 @@ async function listPanels(interaction: ChatInputCommandInteraction): Promise<voi
 /* ------------------------------------------------------------------ */
 
 async function configPanel(interaction: ChatInputCommandInteraction): Promise<void> {
-  const panel = resolvePanel(interaction.options.getString('panel', true));
+  const panel = await requirePanel(interaction);
   if (!panel) return;
 
   const welcomeMessage = interaction.options.getString('welcome-message');
   const pingOnCreate = interaction.options.getBoolean('ping-on-create');
   const autoCloseHours = interaction.options.getInteger('auto-close-hours');
   const transcripts = interaction.options.getBoolean('transcripts');
+  const addStaffRole = interaction.options.getRole('add-staff-role');
+  const removeStaffRole = interaction.options.getRole('remove-staff-role');
+  const addPingRole = interaction.options.getRole('add-ping-role');
+  const removePingRole = interaction.options.getRole('remove-ping-role');
+  const transcriptChannel = interaction.options.getChannel('transcript-channel');
 
-  if (welcomeMessage === null && pingOnCreate === null && autoCloseHours === null && transcripts === null) {
+  const hasChanges =
+    welcomeMessage !== null ||
+    pingOnCreate !== null ||
+    autoCloseHours !== null ||
+    transcripts !== null ||
+    addStaffRole !== null ||
+    removeStaffRole !== null ||
+    addPingRole !== null ||
+    removePingRole !== null ||
+    transcriptChannel !== null;
+
+  if (!hasChanges) {
     // Show current config
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
@@ -424,6 +466,7 @@ async function configPanel(interaction: ChatInputCommandInteraction): Promise<vo
         { name: 'Ping on Create', value: panel.pingOnCreate ? '✅ Enabled' : '❌ Disabled', inline: true },
         { name: 'Auto-close (hours)', value: panel.autoCloseHours === 0 ? 'Disabled' : `${panel.autoCloseHours}h`, inline: true },
         { name: 'Transcripts', value: panel.transcriptsEnabled ? '✅ Enabled' : '❌ Disabled', inline: true },
+        { name: 'Transcript Channel', value: panel.transcriptChannelId ? `<#${panel.transcriptChannelId}>` : '(ticket log channel)', inline: false },
         { name: 'Staff Roles', value: panel.staffRoles.map((r) => `<@&${r}>`).join(', ') || '(none)', inline: false },
         { name: 'Ping Roles', value: panel.pingRoles.map((r) => `<@&${r}>`).join(', ') || '(none)', inline: false },
         { name: 'Form Fields', value: panel.formFields.length > 0 ? `${panel.formFields.length} field(s)` : '(none)', inline: false },
@@ -433,18 +476,60 @@ async function configPanel(interaction: ChatInputCommandInteraction): Promise<vo
     return;
   }
 
+  const changes: string[] = [];
+
   updateConfig((c) => {
     const target = c.tickets.panels.find((p) => p.id === panel.id);
-    if (target) {
-      if (welcomeMessage !== null) target.welcomeMessage = welcomeMessage;
-      if (pingOnCreate !== null) target.pingOnCreate = pingOnCreate;
-      if (autoCloseHours !== null) target.autoCloseHours = autoCloseHours;
-      if (transcripts !== null) target.transcriptsEnabled = transcripts;
+    if (!target) return;
+
+    if (welcomeMessage !== null) {
+      target.welcomeMessage = welcomeMessage;
+      changes.push('Welcome message updated');
+    }
+    if (pingOnCreate !== null) {
+      target.pingOnCreate = pingOnCreate;
+      changes.push(`Ping on create → ${pingOnCreate ? 'enabled' : 'disabled'}`);
+    }
+    if (autoCloseHours !== null) {
+      target.autoCloseHours = autoCloseHours;
+      changes.push(`Auto-close → ${autoCloseHours === 0 ? 'disabled' : `${autoCloseHours}h`}`);
+    }
+    if (transcripts !== null) {
+      target.transcriptsEnabled = transcripts;
+      changes.push(`Transcripts → ${transcripts ? 'enabled' : 'disabled'}`);
+    }
+    if (addStaffRole && !target.staffRoles.includes(addStaffRole.id)) {
+      target.staffRoles.push(addStaffRole.id);
+      changes.push(`Added staff role <@&${addStaffRole.id}>`);
+    }
+    if (removeStaffRole) {
+      const before = target.staffRoles.length;
+      target.staffRoles = target.staffRoles.filter((id) => id !== removeStaffRole.id);
+      if (target.staffRoles.length !== before) {
+        changes.push(`Removed staff role <@&${removeStaffRole.id}>`);
+      }
+    }
+    if (addPingRole && !target.pingRoles.includes(addPingRole.id)) {
+      target.pingRoles.push(addPingRole.id);
+      changes.push(`Added ping role <@&${addPingRole.id}>`);
+    }
+    if (removePingRole) {
+      const before = target.pingRoles.length;
+      target.pingRoles = target.pingRoles.filter((id) => id !== removePingRole.id);
+      if (target.pingRoles.length !== before) {
+        changes.push(`Removed ping role <@&${removePingRole.id}>`);
+      }
+    }
+    if (transcriptChannel) {
+      target.transcriptChannelId = transcriptChannel.id;
+      changes.push(`Transcript channel → <#${transcriptChannel.id}>`);
     }
   });
 
   await interaction.reply({
-    content: `✅ Ticket panel **${panel.name}** updated.`,
+    content: changes.length
+      ? `✅ Ticket panel **${panel.name}** updated:\n${changes.map((c) => `• ${c}`).join('\n')}`
+      : `No changes were made to **${panel.name}**.`,
     ephemeral: true,
   });
 }
@@ -504,13 +589,27 @@ function nextPanelId(panels: TicketPanel[]): string {
   return `t${index}`;
 }
 
-function resolvePanel(idOrName: string): TicketPanel | null {
+function findPanel(idOrName: string): TicketPanel | null {
   const panels = getConfig().tickets.panels;
   return (
     panels.find((p) => p.id === idOrName) ||
     panels.find((p) => p.name.toLowerCase() === idOrName.toLowerCase()) ||
     null
   );
+}
+
+/** Resolve `panel` and reply on failure so the interaction never times out. */
+async function requirePanel(interaction: ChatInputCommandInteraction): Promise<TicketPanel | null> {
+  const idOrName = interaction.options.getString('panel', true);
+  const panel = findPanel(idOrName);
+  if (!panel) {
+    await interaction.reply({
+      content: `No ticket panel matched **${idOrName}**. Use \`/tickets panel list\` to see the available panels.`,
+      ephemeral: true,
+    });
+    return null;
+  }
+  return panel;
 }
 
 function getTicketCount(): number {

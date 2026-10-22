@@ -44,24 +44,105 @@ interface DbData {
 
 let cache: DbData = { users: {}, tickets: {}, meta: { totalMembers: 0, ticketCounter: 0 } };
 
+function emptyDb(): DbData {
+  return { users: {}, tickets: {}, meta: { totalMembers: 0, ticketCounter: 0 } };
+}
+
+function numericOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+/** Highest ticket number referenced by an existing `T-<n>` id. */
+function highestTicketNumber(tickets: { [ticketId: string]: TicketData }): number {
+  let highest = 0;
+  for (const id of Object.keys(tickets)) {
+    const match = /^T-(\d+)$/.exec(id);
+    if (match) highest = Math.max(highest, parseInt(match[1], 10));
+  }
+  return highest;
+}
+
+/**
+ * Normalise whatever is on disk into the current shape.
+ *
+ * Handles three historical formats:
+ *   1. `{ users, tickets, meta }` (current)
+ *   2. `{ users }` with no tickets/meta (intermediate)
+ *   3. a bare `{ [userId]: UserData }` map (legacy)
+ *
+ * Everything missing is defaulted instead of discarding the file, so a
+ * partially-written/older database is never replaced with an empty one.
+ */
+function normaliseDb(raw: any): DbData {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return emptyDb();
+
+  // Current / intermediate shape: a `users` object.
+  if (raw.users && typeof raw.users === 'object' && !Array.isArray(raw.users)) {
+    const users = raw.users as { [userId: string]: UserData };
+    const tickets =
+      raw.tickets && typeof raw.tickets === 'object' && !Array.isArray(raw.tickets)
+        ? (raw.tickets as { [ticketId: string]: TicketData })
+        : {};
+    const meta = raw.meta && typeof raw.meta === 'object' ? raw.meta : {};
+
+    return {
+      users,
+      tickets,
+      meta: {
+        totalMembers: numericOr(meta.totalMembers, Object.keys(users).length),
+        ticketCounter: numericOr(meta.ticketCounter, highestTicketNumber(tickets)),
+      },
+    };
+  }
+
+  // A current-shape file with a missing/empty `users` key: keep tickets/meta
+  // instead of misreading them as user records.
+  if ('tickets' in raw || 'meta' in raw) {
+    const tickets =
+      raw.tickets && typeof raw.tickets === 'object' && !Array.isArray(raw.tickets)
+        ? (raw.tickets as { [ticketId: string]: TicketData })
+        : {};
+    const meta = raw.meta && typeof raw.meta === 'object' ? raw.meta : {};
+    return {
+      users: {},
+      tickets,
+      meta: {
+        totalMembers: numericOr(meta.totalMembers, 0),
+        ticketCounter: numericOr(meta.ticketCounter, highestTicketNumber(tickets)),
+      },
+    };
+  }
+
+  // Legacy shape: the file itself is the user map. Only treat it as such when
+  // every entry actually looks like a user record.
+  const entries = Object.values(raw);
+  const looksLikeUsers =
+    entries.length === 0 ||
+    entries.every(
+      (value) => value && typeof value === 'object' && typeof (value as { xp?: unknown }).xp === 'number',
+    );
+
+  if (!looksLikeUsers) {
+    console.error('Database file has an unrecognised shape; starting with an empty store.');
+    return emptyDb();
+  }
+
+  return {
+    users: raw as { [userId: string]: UserData },
+    tickets: {},
+    meta: { totalMembers: Object.keys(raw).length, ticketCounter: 0 },
+  };
+}
+
 function load(): DbData {
   try {
     if (fs.existsSync(dbPath)) {
-      const loaded = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
-      // Handle legacy format (direct user object)
-      if (loaded.users && !loaded.tickets) {
-        return { users: loaded.users, tickets: {}, meta: { totalMembers: Object.keys(loaded.users).length, ticketCounter: 0 } };
-      }
-      if (loaded.users && loaded.tickets && loaded.meta) {
-        return loaded;
-      }
-      // Migrate legacy format
-      return { users: loaded, tickets: {}, meta: { totalMembers: Object.keys(loaded).length, ticketCounter: 0 } };
+      return normaliseDb(JSON.parse(fs.readFileSync(dbPath, 'utf8')));
     }
   } catch (err) {
     console.error('Failed to load database:', err);
   }
-  return { users: {}, tickets: {}, meta: { totalMembers: 0, ticketCounter: 0 } };
+  return emptyDb();
 }
 
 function save(data: DbData): void {

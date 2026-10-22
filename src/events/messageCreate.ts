@@ -1,5 +1,5 @@
 import { Message } from 'discord.js';
-import { addXp } from '../db';
+import { addXp, getTicketByChannel, updateTicketActivity } from '../db';
 import { getConfig } from '../config';
 import { randomXp } from '../utils/level';
 import { handleLevelUp } from '../handlers/levelUp';
@@ -28,6 +28,28 @@ export async function handleMessageCreate(message: Message): Promise<void> {
   if (!message.guild) return;
 
   const cfg = getConfig();
+
+  // Keep ticket auto-close timers accurate (every message counts as activity,
+  // including staff replies).
+  try {
+    const ticket = getTicketByChannel(message.channelId);
+    if (ticket && (ticket.status === 'open' || ticket.status === 'claimed')) {
+      updateTicketActivity(ticket.id);
+    }
+  } catch (err) {
+    console.error('Failed to update ticket activity:', err);
+  }
+
+  // Auto-reactions are independent of XP eligibility: they must fire even in
+  // no-XP channels and while the author is on the XP cooldown.
+  if (!message.author.bot) {
+    try {
+      await handleAutoReactions(message, cfg);
+    } catch (err) {
+      console.error('Auto-reaction failed:', err);
+    }
+  }
+
   const xpCfg = cfg.xp;
 
   // Optionally ignore bots for text-channel XP
@@ -66,13 +88,6 @@ export async function handleMessageCreate(message: Message): Promise<void> {
     }
   } catch (err) {
     console.error('Failed to process XP for message:', err);
-  }
-
-  // Handle auto-reactions (after XP processing so it doesn't block)
-  try {
-    await handleAutoReactions(message, cfg);
-  } catch (err) {
-    console.error('Auto-reaction failed:', err);
   }
 }
 

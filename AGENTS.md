@@ -7,11 +7,9 @@
 | `npm start` | `tsx src/index.ts` — no build step |
 | `npm run build` | `tsc` → `dist/` |
 | `npm run serve` | `node dist/index.js` |
-| `npm run setup` | Interactive config wizard → writes `config.json` (validates token live) |
-| `npm run doctor` | Diagnose token, permissions, channels, roles, panel messages |
 
 ## Configuration
-- `config.json` — runtime config (created by `npm run setup`). **Gitignored — never commit real tokens.**
+- `config.json` — runtime config (edit by hand or via the in-Discord `/config` commands). **Gitignored — never commit real tokens.**
 - `.env` — optional `BOT_TOKEN`, `CLIENT_ID`, `GUILD_ID` overrides (dotenv; `config.json` is the fallback). See `.env.example`.
 - `data/talaba.json` — JSON DB (XP, levels, voice minutes, tickets). Auto-created. **Gitignored.**
 - `dist/` — build output. **Gitignored.**
@@ -36,11 +34,11 @@
 ## Discord requirements
 - Privileged intents (Developer Portal → Bot): **Server Members**, **Message Content**. (Presence is not used.)
 - Bot permissions: Manage Roles (must sit above any role it assigns), Send Messages, Read Message History, View Channels.
-- `npm run doctor` catches role-hierarchy issues, missing intents, and 401 tokens.
+- If role changes silently fail, check the bot's role position and its 401/token errors in the startup log.
 
 ## Development notes
 - No test suite / linter / formatter — plain TypeScript, `tsc --strict`. Typecheck: `npx tsc --noEmit`.
 - Slash commands re-register to `guildId` on every start — run `npm start` after adding commands.
 - `config.json` is read once at startup; in-Discord slash-command changes write to disk but do **not** restart the bot. `npm run dev` only restarts on code changes.
-- Token vs client secret: both look like `xxx.yyy.zzz`. Only the Bot Token works. `setup`/`doctor` detect 401.
+- Token vs client secret: both look like `xxx.yyy.zzz`. Only the Bot Token works; the startup log reports a 401.
 - Line endings: `.gitattributes` forces LF (`eol=lf`) even on Windows — match existing files when editing.

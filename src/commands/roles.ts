@@ -247,7 +247,7 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
 
 async function add(interaction: ChatInputCommandInteraction): Promise<void> {
   const guild = interaction.guild!;
-  const panel = resolvePanel(interaction.options.getString('panel', true));
+  const panel = await requirePanel(interaction);
   if (!panel) return;
 
   const role = interaction.options.getRole('role', true) as Role;
@@ -307,7 +307,7 @@ async function add(interaction: ChatInputCommandInteraction): Promise<void> {
 
 async function remove(interaction: ChatInputCommandInteraction): Promise<void> {
   const guild = interaction.guild!;
-  const panel = resolvePanel(interaction.options.getString('panel', true));
+  const panel = await requirePanel(interaction);
   if (!panel) return;
 
   const role = interaction.options.getRole('role', true) as Role;
@@ -346,6 +346,40 @@ async function remove(interaction: ChatInputCommandInteraction): Promise<void> {
 
 async function list(interaction: ChatInputCommandInteraction): Promise<void> {
   const panels = getConfig().roles.panels;
+  const requested = interaction.options.getString('panel');
+
+  // Listing a specific panel shows its buttons, as documented.
+  if (requested) {
+    const panel = findPanel(requested);
+    if (!panel) {
+      await interaction.reply({
+        content: `No panel named **${requested}**. Use \`/roles panel list\` to see every panel.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle(`🎭 ${panel.name}`)
+      .addFields(
+        { name: 'Channel', value: `<#${panel.channelId}>`, inline: true },
+        { name: 'Override roles', value: panel.overrideRoles ? '✅ Enabled' : '❌ Disabled', inline: true },
+        {
+          name: `Buttons (${panel.buttons.length})`,
+          value:
+            panel.buttons.length > 0
+              ? panel.buttons
+                  .map((button) => `${button.emoji ? `${button.emoji} ` : ''}**${button.label}** → <@&${button.roleId}>`)
+                  .join('\n')
+              : '(none) — add one with `/roles panel add`',
+        },
+      );
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+    return;
+  }
+
   const embed = new EmbedBuilder().setColor(0x5865f2).setTitle('🎭 Role panels');
 
   if (panels.length === 0) {
@@ -366,7 +400,7 @@ async function list(interaction: ChatInputCommandInteraction): Promise<void> {
 
 async function removePanel(interaction: ChatInputCommandInteraction): Promise<void> {
   const guild = interaction.guild!;
-  const panel = resolvePanel(interaction.options.getString('panel', true));
+  const panel = await requirePanel(interaction);
   if (!panel) return;
 
   // Try to delete the panel message
@@ -396,7 +430,7 @@ async function removePanel(interaction: ChatInputCommandInteraction): Promise<vo
 
 async function configPanel(interaction: ChatInputCommandInteraction): Promise<void> {
   const guild = interaction.guild!;
-  const panel = resolvePanel(interaction.options.getString('panel', true));
+  const panel = await requirePanel(interaction);
   if (!panel) return;
 
   const overrideRoles = interaction.options.getBoolean('override-roles');
@@ -437,13 +471,30 @@ function nextPanelId(panels: RolePanel[]): string {
   return `p${index}`;
 }
 
-function resolvePanel(idOrName: string): RolePanel | null {
+function findPanel(idOrName: string): RolePanel | null {
   const panels = getConfig().roles.panels;
   return (
     panels.find((p) => p.id === idOrName) ||
     panels.find((p) => p.name.toLowerCase() === idOrName.toLowerCase()) ||
     null
   );
+}
+
+/**
+ * Resolve the `panel` option and answer the interaction itself when the value
+ * does not match a panel — otherwise the command would time out silently.
+ */
+async function requirePanel(interaction: ChatInputCommandInteraction): Promise<RolePanel | null> {
+  const idOrName = interaction.options.getString('panel', true);
+  const panel = findPanel(idOrName);
+  if (!panel) {
+    await interaction.reply({
+      content: `No panel matched **${idOrName}**. Use \`/roles panel list\` to see the available panels.`,
+      ephemeral: true,
+    });
+    return null;
+  }
+  return panel;
 }
 
 /**

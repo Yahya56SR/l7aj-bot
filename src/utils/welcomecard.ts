@@ -119,9 +119,10 @@ export class WelcomeCardCanvas {
     const avatarRadius = 100;
     const textY = avatarCenterY + avatarRadius + 90;
 
-    // Replace placeholders in welcome message
+    // Replace placeholders in welcome message. The card is an image, so a
+    // Discord mention would render as broken text — use the display name.
     const message = data.welcomeMessage
-      .replace(/{user}/g, `<@${data.displayName}>`) // Will be replaced with mention in actual send
+      .replace(/{user}/g, data.displayName)
       .replace(/{username}/g, data.displayName)
       .replace(/{server}/g, data.guildName)
       .replace(/{memberCount}/g, data.memberCount.toString());

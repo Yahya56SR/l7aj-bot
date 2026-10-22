@@ -6,15 +6,13 @@ Discord bot with a MEE6-style XP system, button role panels, reaction roles, ver
 
 ```bash
 npm install
-npm run setup     # interactive — fills in config.json
-npm run doctor    # verifies token, permissions, channels, roles
-npm run dev       # starts the bot (tsx watch, no build needed)
+cp .env.example .env   # then fill in BOT_TOKEN, CLIENT_ID, GUILD_ID
+npm run dev            # starts the bot (tsx watch, no build needed)
 ```
 
-`npm run setup` asks for your bot token, IDs, emoji → role mappings, level → role mappings,
-XP rates and announcement channels, then writes `config.json`. You can run it again any time —
-existing values become the defaults. The wizard validates your token against Discord live,
-so it will never save a token that returns 401.
+Settings can also live in `config.json` (`token`, `clientId`, `guildId`); environment variables
+take precedence. Every other setting is managed from Discord with the `/config`, `/levels`, `/xp`,
+`/roles`, `/verify` and `/tickets` commands, which write back to `config.json`.
 
 ## Scripts
 
@@ -24,8 +22,6 @@ so it will never save a token that returns 401.
 | `npm start` | Run the bot (no build needed) |
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm run serve` | Run the compiled output in `dist/` |
-| `npm run setup` | Interactive config wizard |
-| `npm run doctor` | Diagnose token / permissions / channels / roles |
 
 > `npm run dev` uses `tsx watch src/index.ts`. Because `config.json` is read at runtime rather
 > than imported, changing settings from Discord **does not** trigger a restart.
@@ -146,11 +142,11 @@ Available placeholders: `{user}` (ping) · `{username}` · `{level}` · `{server
 
 - Server Members Intent
 - Message Content Intent
-- Presence Intent
+
+Presence is not used, so the Presence Intent is optional.
 
 **Server permissions for the bot:** Manage Roles, Send Messages, Read Message History, View Channels.
-**Manage Roles** must sit above any role the bot assigns, otherwise role assignment silently fails
-(`npm run doctor` catches this).
+**Manage Roles** must sit above any role the bot assigns, otherwise role assignment silently fails.
 
 ## Hosting (bot-hosting.net)
 

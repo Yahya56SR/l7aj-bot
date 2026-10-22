@@ -13,6 +13,8 @@ import {
   Message,
   Role,
   GuildMember,
+  Guild,
+  Client,
   AttachmentBuilder,
 } from 'discord.js';
 import { getConfig, updateConfig, TicketPanel, TicketFormField } from '../config';
@@ -25,6 +27,7 @@ import {
   claimTicket,
   unclaimTicket,
   getTicketsByCreator,
+  getOpenTickets,
   getNextTicketNumber,
   updateTicketActivity,
 } from '../db';
@@ -107,9 +110,7 @@ async function handleTicketOpen(interaction: ButtonInteraction, panelId: string)
   const member = interaction.member as GuildMember;
 
   // Check if user already has an open ticket in this panel
-  const existing = getTicketsByCreator(member.id).find(
-    (t) => t.panelId === panelId && (t.status === 'open' || t.status === 'claimed'),
-  );
+  const existing = await findLiveOpenTicket(guild, member.id, panelId, interaction.client.user?.id);
   if (existing) {
     await safeReply(interaction, {
       content: `You already have an open ticket in <#${existing.channelId}>.`,
@@ -124,7 +125,39 @@ async function handleTicketOpen(interaction: ButtonInteraction, panelId: string)
     return;
   }
 
-  await createTicketChannel(interaction, panel, member, []);
+  const channel = await createTicketChannel(interaction, panel, member, []);
+  if (!channel) {
+    await safeReply(interaction, {
+      content: 'Failed to create the ticket channel. Check my permissions and try again.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await safeReply(interaction, { content: `✅ Ticket opened: <#${channel.id}>`, ephemeral: true });
+}
+
+/**
+ * Find an open ticket for this member/panel. If its channel was deleted by
+ * hand, close the stale DB record so the member isn't blocked from opening a
+ * new ticket forever.
+ */
+async function findLiveOpenTicket(
+  guild: Guild,
+  creatorId: string,
+  panelId: string,
+  systemId?: string,
+): Promise<{ id: string; channelId: string } | null> {
+  const existing = getTicketsByCreator(creatorId).find(
+    (t) => t.panelId === panelId && (t.status === 'open' || t.status === 'claimed'),
+  );
+  if (!existing) return null;
+
+  const channel = await guild.channels.fetch(existing.channelId).catch(() => null);
+  if (channel) return existing;
+
+  closeTicket(existing.id, systemId ?? 'system', 'Channel no longer exists');
+  return null;
 }
 
 /**
@@ -168,9 +201,7 @@ async function handleTicketModalSubmit(interaction: ModalSubmitInteraction, pane
   const member = interaction.member as GuildMember;
 
   // Check for existing open ticket
-  const existing = getTicketsByCreator(member.id).find(
-    (t) => t.panelId === panelId && (t.status === 'open' || t.status === 'claimed'),
-  );
+  const existing = await findLiveOpenTicket(guild, member.id, panelId, interaction.client.user?.id);
   if (existing) {
     await interaction.reply({
       content: `You already have an open ticket in <#${existing.channelId}>.`,
@@ -187,30 +218,35 @@ async function handleTicketModalSubmit(interaction: ModalSubmitInteraction, pane
   }
 
   await interaction.deferReply({ ephemeral: true });
-  await createTicketChannel(interaction as any, panel, member, formResponses);
-  await interaction.editReply({
-    content: `✅ Ticket created! Check <#${getConfig().tickets.categoryId} category> for your new ticket channel.`,
-  });
+  const channel = await createTicketChannel(interaction, panel, member, formResponses);
+  if (!channel) {
+    await interaction.editReply({
+      content: '❌ Failed to create the ticket channel. Check my permissions and try again.',
+    });
+    return;
+  }
+  await interaction.editReply({ content: `✅ Ticket created: <#${channel.id}>` });
 }
 
 /**
  * Create the ticket channel and database record.
+ * Returns the new channel, or null when it could not be created.
  */
 async function createTicketChannel(
   interaction: ButtonInteraction | any,
   panel: TicketPanel,
   member: GuildMember,
   formResponses: { fieldId: string; label: string; value: string }[],
-): Promise<void> {
+): Promise<TextChannel | null> {
   const guild = interaction.guild || interaction.client.guilds.cache.get(interaction.guildId!);
-  if (!guild) return;
+  if (!guild) return null;
 
   const cfg = getConfig();
   const category = await guild.channels.fetch(panel.categoryId).catch(() => null);
   if (!category || category.type !== 4) {
     // GUILD_CATEGORY = 4
-    await safeReply(interaction, { content: 'Ticket category not found.', ephemeral: true });
-    return;
+    console.error(`Ticket panel ${panel.id} points at a missing/invalid category (${panel.categoryId}).`);
+    return null;
   }
 
   const ticketNumber = getNextTicketNumber();
@@ -222,6 +258,15 @@ async function createTicketChannel(
     { id: guild.id, deny: ['ViewChannel'] },
     { id: member.id, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'AttachFiles'] },
   ];
+
+  // The @everyone deny above also applies to the bot unless it is an
+  // administrator, so grant it explicit access to send the welcome message.
+  if (guild.members.me) {
+    overwrites.push({
+      id: guild.members.me.id,
+      allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'AttachFiles', 'EmbedLinks', 'ManageMessages'],
+    });
+  }
 
   // Staff roles can see the ticket
   const staffRoles = panel.staffRoles.length > 0 ? panel.staffRoles : cfg.tickets.defaultStaffRoles;
@@ -240,8 +285,7 @@ async function createTicketChannel(
     })) as TextChannel;
   } catch (err) {
     console.error('Failed to create ticket channel:', err);
-    await safeReply(interaction, { content: 'Failed to create ticket channel. Check my permissions.', ephemeral: true });
-    return;
+    return null;
   }
 
   // Create ticket record
@@ -274,7 +318,10 @@ async function createTicketChannel(
   if (formResponses.length > 0) {
     embed.addFields({
       name: 'Form Responses',
-      value: formResponses.map((f) => `**${f.label}:** ${f.value}`).join('\n'),
+      value: formResponses
+        .map((f) => `**${f.label}:** ${f.value}`)
+        .join('\n')
+        .slice(0, 1024),
       inline: false,
     });
   }
@@ -307,17 +354,7 @@ async function createTicketChannel(
   // Log to log channel
   await logTicketEvent(guild, 'OPEN', ticketId, member, channel, panel);
 
-  // Try to notify user (ephemeral reply from original interaction)
-  try {
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({
-        content: `✅ Ticket opened: <#${channel.id}>`,
-        ephemeral: true,
-      });
-    }
-  } catch {
-    // Ignore
-  }
+  return channel;
 }
 
 /* ------------------------------------------------------------------ */
@@ -331,6 +368,11 @@ async function handleTicketClose(interaction: ButtonInteraction, ticketId: strin
   const ticket = getTicket(ticketId);
   if (!ticket) {
     await safeReply(interaction, { content: 'Ticket not found.', ephemeral: true });
+    return;
+  }
+
+  if (ticket.status === 'closed') {
+    await safeReply(interaction, { content: 'This ticket is already closed.', ephemeral: true });
     return;
   }
 
@@ -357,18 +399,29 @@ async function handleTicketClose(interaction: ButtonInteraction, ticketId: strin
   }
 
   // Generate transcript if enabled
-  let transcriptUrl: string | undefined;
+  let transcript: TicketTranscript | null = null;
   if (panel?.transcriptsEnabled) {
-    transcriptUrl = await generateTranscript(channel as TextChannel, ticketId);
+    transcript = await generateTranscript(channel as TextChannel, ticketId);
   }
 
   // Close in DB
-  closeTicket(ticketId, member.id, undefined, transcriptUrl);
+  closeTicket(ticketId, member.id, undefined, transcript?.filePath);
+
+  // Deliver the transcript to the configured channel (falls back to the
+  // ticket log channel) so staff can actually read it.
+  if (transcript) {
+    await deliverTranscript(guild, panel, transcript, ticketId).catch((err) =>
+      console.error('Failed to deliver ticket transcript:', err),
+    );
+  }
 
   // Update embed to show closed
   try {
     const messages = await channel.messages.fetch({ limit: 10 });
-    const welcomeMsg = messages.find((m) => m.author.id === guild.members.me!.id && m.embeds.length > 0);
+    const selfId = interaction.client.user?.id;
+    const welcomeMsg = messages.find(
+      (m) => m.author.id === selfId && m.embeds.length > 0,
+    );
     if (welcomeMsg) {
       const oldEmbed = welcomeMsg.embeds[0];
       const embed = new EmbedBuilder()
@@ -518,19 +571,28 @@ async function handleTicketTranscript(interaction: ButtonInteraction, ticketId: 
     return;
   }
 
-  const transcriptUrl = await generateTranscript(channel as TextChannel, ticketId);
-  updateTicket(ticketId, { transcriptUrl: transcriptUrl });
+  const transcript = await generateTranscript(channel as TextChannel, ticketId);
+  updateTicket(ticketId, { transcriptUrl: transcript.filePath });
 
+  // Attach the file itself — a `file://` path is not usable inside Discord.
   await safeReply(interaction, {
-    content: `📄 Transcript for ticket #${ticketId.slice(2)}: ${transcriptUrl}`,
+    content: `📄 Transcript for ticket #${ticketId.slice(2)}`,
     ephemeral: true,
+    files: [new AttachmentBuilder(transcript.filePath, { name: transcript.fileName })],
   });
+}
+
+interface TicketTranscript {
+  /** Absolute path on this host. */
+  filePath: string;
+  /** File name used when uploading to Discord. */
+  fileName: string;
 }
 
 /**
  * Generate a text transcript of a ticket channel.
  */
-async function generateTranscript(channel: TextChannel, ticketId: string): Promise<string> {
+async function generateTranscript(channel: TextChannel, ticketId: string): Promise<TicketTranscript> {
   const messages = await channel.messages.fetch({ limit: 100 });
   const sorted = messages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
@@ -540,7 +602,8 @@ async function generateTranscript(channel: TextChannel, ticketId: string): Promi
   transcript += '='.repeat(50) + '\n\n';
 
   for (const msg of sorted.values()) {
-    transcript += `[${msg.createdAt.toISOString()}] ${msg.author.tag} (${msg.author.id}): ${msg.content}\n`;
+    const author = msg.author?.tag ?? msg.author?.username ?? 'Unknown user';
+    transcript += `[${msg.createdAt.toISOString()}] ${author} (${msg.author?.id ?? 'unknown'}): ${msg.content}\n`;
     if (msg.attachments.size > 0) {
       for (const [, att] of msg.attachments) {
         transcript += `  Attachment: ${att.url}\n`;
@@ -559,8 +622,27 @@ async function generateTranscript(channel: TextChannel, ticketId: string): Promi
   const filePath = path.join(transcriptsDir, fileName);
   fs.writeFileSync(filePath, transcript, 'utf8');
 
-  // Return a local file path reference (in production, upload to a paste service)
-  return `file://${filePath}`;
+  return { filePath, fileName };
+}
+
+/** Upload a transcript to the panel's transcript channel (or the ticket log). */
+async function deliverTranscript(
+  guild: Guild,
+  panel: TicketPanel | undefined,
+  transcript: TicketTranscript,
+  ticketId: string,
+): Promise<void> {
+  const cfg = getConfig();
+  const channelId = panel?.transcriptChannelId || cfg.tickets.logChannelId;
+  if (!channelId) return;
+
+  const channel = await guild.channels.fetch(channelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) return;
+
+  await channel.send({
+    content: `📄 Transcript for ticket #${ticketId.slice(2)}`,
+    files: [new AttachmentBuilder(transcript.filePath, { name: transcript.fileName })],
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -571,7 +653,7 @@ async function logTicketEvent(
   guild: any,
   event: string,
   ticketId: string,
-  member: GuildMember,
+  member: { id: string },
   channel: TextChannel,
   panel: TicketPanel | undefined,
 ): Promise<void> {
@@ -601,7 +683,7 @@ async function logTicketEvent(
 
 async function safeReply(
   interaction: ButtonInteraction,
-  options: { content: string; ephemeral: boolean },
+  options: { content: string; ephemeral: boolean; files?: AttachmentBuilder[] },
 ): Promise<void> {
   try {
     if (interaction.replied || interaction.deferred) {
@@ -611,5 +693,65 @@ async function safeReply(
     }
   } catch {
     // Ignore
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Auto-close                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Close tickets that have been inactive for longer than their panel's
+ * `autoCloseHours`. Called periodically from index.ts.
+ */
+export async function runTicketAutoClose(client: Client): Promise<void> {
+  const cfg = getConfig();
+  if (!cfg.tickets.panels.some((panel) => panel.autoCloseHours > 0)) return;
+
+  const now = Date.now();
+  const systemId = client.user?.id ?? 'system';
+
+  for (const ticket of getOpenTickets()) {
+    const panel = cfg.tickets.panels.find((p) => p.id === ticket.panelId);
+    if (!panel || !panel.autoCloseHours || panel.autoCloseHours <= 0) continue;
+
+    const lastActivity = ticket.lastActivity || ticket.createdAt;
+    if (now - lastActivity < panel.autoCloseHours * 60 * 60 * 1000) continue;
+
+    const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) {
+      // The channel is gone, so there is nothing left to close in Discord.
+      closeTicket(ticket.id, systemId, 'Channel no longer exists');
+      continue;
+    }
+
+    const textChannel = channel as TextChannel;
+    const reason = `Auto-closed after ${panel.autoCloseHours}h of inactivity`;
+
+    let transcript: TicketTranscript | null = null;
+    if (panel.transcriptsEnabled) {
+      transcript = await generateTranscript(textChannel, ticket.id).catch((err) => {
+        console.error('Failed to generate auto-close transcript:', err);
+        return null;
+      });
+    }
+
+    closeTicket(ticket.id, systemId, reason, transcript?.filePath);
+
+    if (transcript) {
+      await deliverTranscript(textChannel.guild, panel, transcript, ticket.id).catch((err) =>
+        console.error('Failed to deliver auto-close transcript:', err),
+      );
+    }
+
+    await textChannel
+      .send(`🔒 This ticket was closed automatically after **${panel.autoCloseHours}h** of inactivity.`)
+      .catch(() => undefined);
+
+    await logTicketEvent(textChannel.guild, 'AUTO-CLOSE', ticket.id, { id: systemId }, textChannel, panel);
+
+    setTimeout(() => {
+      void textChannel.delete().catch(() => undefined);
+    }, 5000);
   }
 }

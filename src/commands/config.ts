@@ -117,7 +117,7 @@ export const data = new SlashCommandBuilder()
       .addSubcommand((sub) =>
         sub
           .setName('ai')
-          .setDescription('Configure AI-powered moderation (Groq)')
+          .setDescription('Configure AI-powered moderation (Gemini Live)')
           .addStringOption((opt) =>
             opt
               .setName('action')
@@ -137,7 +137,7 @@ export const data = new SlashCommandBuilder()
           .addStringOption((opt) =>
             opt
               .setName('model')
-              .setDescription('Groq model id (for set-model)')
+              .setDescription('Gemini Live model id (for set-model)')
           )
           .addStringOption((opt) =>
             opt.setName('prompt').setDescription('Custom system prompt (for set-prompt)')
@@ -793,15 +793,18 @@ async function handleWelcomeConfig(interaction: ChatInputCommandInteraction, sub
   switch (subcommand) {
     case 'setup': {
       const channel = interaction.options.getChannel('channel', true);
-      const message = interaction.options.getString('message') || 'Welcome {user} to {server}! 🎉';
+      const message = interaction.options.getString('message');
+      const imageMessage = interaction.options.getString('image-message');
       const enabled = interaction.options.getBoolean('enabled') ?? true;
 
       updateConfig((c) => {
         c.welcome.channelId = channel.id;
-        c.welcome.message = message;
+        if (message !== null) c.welcome.message = message;
+        if (imageMessage !== null) c.welcome.welcomeImageMessage = imageMessage;
         c.welcome.enabled = enabled;
       });
 
+      const cfgAfter = getConfig();
       await logConfigChange(
         interaction,
         `Welcome messages configured: channel ${channel}, enabled ${enabled}.`,
@@ -810,7 +813,8 @@ async function handleWelcomeConfig(interaction: ChatInputCommandInteraction, sub
       await interaction.reply({
         content: `✅ Welcome messages configured!\n` +
           `Channel: ${channel}\n` +
-          `Message: \`${message}\`\n` +
+          `Message: \`${cfgAfter.welcome.message}\`\n` +
+          `Image message: \`${cfgAfter.welcome.welcomeImageMessage}\`\n` +
           `Status: ${enabled ? 'Enabled' : 'Disabled'}`,
         ephemeral: true,
       });
@@ -870,9 +874,10 @@ async function handleWelcomeConfig(interaction: ChatInputCommandInteraction, sub
 
       // Import welcome card and db
       const { welcomeCard } = await import('../utils/welcomecard');
-      const { incrementTotalMembers } = await import('../db');
+      const { getTotalMemberCount } = await import('../db');
 
-      const totalMemberCount = incrementTotalMembers();
+      // A test must not inflate the all-time member counter.
+      const totalMemberCount = getTotalMemberCount();
       const avatarUrl = interaction.user.displayAvatarURL({ extension: 'png', size: 512 });
 
       const cardBuffer = await welcomeCard.generate({

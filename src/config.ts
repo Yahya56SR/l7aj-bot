@@ -68,7 +68,7 @@ export interface AutomodConfig {
   attachmentOnlyChannels: string[];
   /** Channel where automod actions are logged (empty = no mod logs) */
   modLogsChannelId: string;
-  /** LLM-based moderation (Groq) */
+  /** LLM-based moderation (Gemini Live) */
   aiModeration: AiModerationConfig;
 }
 

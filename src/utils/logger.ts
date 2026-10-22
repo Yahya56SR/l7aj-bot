@@ -106,6 +106,12 @@ function userLine(user: { id: string; username?: string; tag?: string }): string
   return `<@${user.id}> (\`${user.id}\`)`;
 }
 
+/** Keep embed field values inside Discord's 1024-character limit. */
+function truncate(value: string, max = 1000): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Role events                                                                */
 /* -------------------------------------------------------------------------- */
@@ -278,9 +284,13 @@ export async function logMemberLeave(
   client: LoggableClient,
 ): Promise<void> {
   const embed = baseEmbed('📤 Member Left', 0xed4245)
-    .setDescription(userLine(member.user))
+    .setDescription(userLine(member.user ?? { id: member.id }))
     .addFields(
-      { name: 'Member', value: `${member.user.username} (\`${member.id}\`)`, inline: true },
+      {
+        name: 'Member',
+        value: `${member.user?.username ?? member.id} (\`${member.id}\`)`,
+        inline: true,
+      },
       {
         name: 'Member Count',
         value: String(member.guild.memberCount),
@@ -652,7 +662,7 @@ export async function logEmojiDelete(
   emoji: GuildEmoji,
   client: LoggableClient,
 ): Promise<void> {
-  const embed = baseEmbed('𗴖 Emoji Deleted', 0xed4245)
+  const embed = baseEmbed('🗑️ Emoji Deleted', 0xed4245)
     .addFields(
       { name: 'Emoji', value: emoji.name, inline: true },
       { name: 'Emoji ID', value: `\`${emoji.id}\``, inline: true },
@@ -707,11 +717,11 @@ export async function logMessageEdit(
       { name: 'Channel', value: `${newMessage.channel}`, inline: true },
       {
         name: 'Before',
-        value: oldMessage.content || '*no content*',
+        value: truncate(oldMessage.content || '*no content*'),
       },
       {
         name: 'After',
-        value: newMessage.content || '*no content*',
+        value: truncate(newMessage.content || '*no content*'),
       },
     );
 
@@ -723,7 +733,8 @@ export async function logMessageDelete(
   message: Message,
   client: LoggableClient,
 ): Promise<void> {
-  if (message.author.bot) return;
+  // Partial messages (uncached/old deletes) have no author/content.
+  if (!message.author || message.author.bot) return;
   if (!message.guild) return;
 
   const embed = baseEmbed('🗑️ Message Deleted', 0xed4245)
@@ -732,7 +743,7 @@ export async function logMessageDelete(
       { name: 'Channel', value: `${message.channel}`, inline: true },
       {
         name: 'Content',
-        value: message.content || '*no content*',
+        value: truncate(message.content || '*no content*'),
       },
     );
 
@@ -787,7 +798,7 @@ export async function logVoiceStateUpdate(
 ): Promise<void> {
   const member = newState.member ?? oldState.member;
   if (!member || !member.guild) return;
-  const user = member.user;
+  const user = member.user ?? { id: member.id };
 
   const joined = !oldState.channelId && !!newState.channelId;
   const left = !!oldState.channelId && !newState.channelId;
