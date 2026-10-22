@@ -644,10 +644,17 @@ async function handleAutomodAiConfig(interaction: ChatInputCommandInteraction): 
         await interaction.reply({ content: '❌ No GEMINI_API_KEY configured.', ephemeral: true });
         return;
       }
-      const moderator = new GeminiLiveModerator(apiKey, ai.model);
-      // Use a short timeout so Discord doesn't expire the interaction (~3s limit).
+      const moderator = new GeminiLiveModerator({
+        apiKey,
+        model: ai.model,
+        systemPrompt: ai.systemPrompt,
+        categories: ai.categories,
+        thinkingLevel: ai.thinkingLevel,
+      });
+      // deferReply lifts Discord's ~3s interaction limit, so allow a cold
+      // connect + generation instead of failing open on the first message.
       await interaction.deferReply({ ephemeral: true });
-      const verdict = await moderator.moderate(text, 3000);
+      const verdict = await moderator.moderate(text, 10_000);
       moderator.close();
       if (!verdict) {
         await interaction.editReply({ content: '⚠️ AI moderation returned no verdict (fail open — message would be allowed).' });

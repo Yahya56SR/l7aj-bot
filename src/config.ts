@@ -26,14 +26,19 @@ export interface RolePanel {
 export interface AiModerationConfig {
   /** Whether LLM-based moderation is enabled */
   enabled: boolean;
-  /** Groq model id */
+  /** Gemini Live model id (e.g. gemini-3.8-live) */
   model: string;
-  /** Groq API key (prefer GROQ_API_KEY env var; this is a fallback) */
+  /** Gemini API key (prefer GEMINI_API_KEY env var; this is a fallback) */
   apiKey: string;
   /** Custom system prompt that fine-tunes the model for Arabizi & Darija */
   systemPrompt: string;
   /** Categories the model may flag */
   categories: string[];
+  /**
+   * Thinking level for `gemini-3.8-live-extended-thinking` (low/medium/high).
+   * Ignored for `gemini-3.8-live`, which must not receive a thinking config.
+   */
+  thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high' | (string & {});
   /** Minimum message length before calling the model */
   minLength: number;
   /** Minimum confidence (0-1) required to block a message */
@@ -315,8 +320,11 @@ const DEFAULT_CONFIG: BotConfig = {
     modLogsChannelId: '',
     aiModeration: {
       enabled: false,
-      model: 'gemini-3.8-live-extended-thinking',
+      // gemini-3.8-live is the low-latency Live model; extended-thinking needs
+      // a thinkingLevel and is considerably slower for classification.
+      model: 'gemini-3.8-live',
       apiKey: '',
+      thinkingLevel: 'low',
       systemPrompt:
         'You are a Discord content moderator for a Moroccan community. You read messages in Arabic script, ' +
         'Arabizi (Latin-script Arabic using digits 3=ع, 7=ح, 5=خ), French, and Moroccan Darija ' +

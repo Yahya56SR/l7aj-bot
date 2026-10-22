@@ -1,13 +1,27 @@
 import { Message, TextChannel, ThreadChannel, EmbedBuilder } from 'discord.js';
-import { getConfig } from '../config';
+import { getConfig, type AiModerationConfig } from '../config';
 import { GeminiLiveModerator, AiVerdict } from './gemini-live';
 
 let geminiModerator: GeminiLiveModerator | null = null;
+let geminiModeratorKey = '';
 
-function getGeminiModerator(apiKey: string, model: string): GeminiLiveModerator {
-  if (!geminiModerator) {
-    geminiModerator = new GeminiLiveModerator(apiKey, model);
-  }
+/**
+ * Reuse one Live session across messages, but rebuild it when the moderation
+ * settings change (model, prompt, categories, API key, ...).
+ */
+function getGeminiModerator(apiKey: string, ai: AiModerationConfig): GeminiLiveModerator {
+  const key = [apiKey, ai.model, ai.systemPrompt, ai.categories.join(','), ai.thinkingLevel ?? ''].join('|');
+  if (geminiModerator && geminiModeratorKey === key) return geminiModerator;
+
+  geminiModerator?.close();
+  geminiModerator = new GeminiLiveModerator({
+    apiKey,
+    model: ai.model,
+    systemPrompt: ai.systemPrompt,
+    categories: ai.categories,
+    thinkingLevel: ai.thinkingLevel,
+  });
+  geminiModeratorKey = key;
   return geminiModerator;
 }
 
@@ -113,7 +127,7 @@ async function logToModChannel(message: Message, category: string, reason: strin
 }
 
 /**
- * Run the LLM-based moderation check on a message using Groq.
+ * Run the LLM-based moderation check on a message using Gemini Live.
  * Returns true if the message was deleted (blocked), false otherwise.
  * Fails open: if the model is unreachable or returns invalid output, the
  * message is allowed through.
@@ -146,7 +160,7 @@ async function runAiModeration(message: Message): Promise<boolean> {
     return false;
   }
 
-  const moderator = getGeminiModerator(apiKey, ai.model);
+  const moderator = getGeminiModerator(apiKey, ai);
 
   let verdict: AiVerdict | null;
   try {
