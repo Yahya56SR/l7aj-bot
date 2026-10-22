@@ -13,7 +13,7 @@ export interface WelcomeCardData {
 
 /**
  * Generates a sleek black & white welcome card.
- * Only black and white are used — no other colors anywhere.
+ * Only greyscale tones are used — no other colors anywhere.
  * Crisp lines, thin rings, high-contrast text on a black background.
  */
 export class WelcomeCardCanvas {
@@ -35,7 +35,7 @@ export class WelcomeCardCanvas {
     // Draw welcome message — big white text
     this.drawWelcomeText(ctx, data);
 
-    // Draw member count — black pill badge, white border & text
+    // Draw member count — black pill badge, light grey text
     this.drawMemberCount(ctx, data.memberCount);
 
     return canvas.toBuffer('image/png');
@@ -150,39 +150,8 @@ export class WelcomeCardCanvas {
     ctx.textBaseline = 'middle';
     ctx.font = `bold 20px ${FONT_STACK}`;
 
-    const textMetrics = ctx.measureText(memberText);
-    const textWidth = textMetrics.width;
-    const paddingX = 24;
-    const paddingY = 10;
-    const bgWidth = textWidth + paddingX * 2;
-    const bgHeight = 36;
-    const bgX = centerX - bgWidth / 2;
-    const bgY = textY - bgHeight / 2;
-    const radius = 18;
-
-    // Black pill badge with white border
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(bgX + radius, bgY);
-    ctx.lineTo(bgX + bgWidth - radius, bgY);
-    ctx.quadraticCurveTo(bgX + bgWidth, bgY, bgX + bgWidth, bgY + radius);
-    ctx.lineTo(bgX + bgWidth, bgY + bgHeight - radius);
-    ctx.quadraticCurveTo(bgX + bgWidth, bgY + bgHeight, bgX + bgWidth - radius, bgY + bgHeight);
-    ctx.lineTo(bgX + radius, bgY + bgHeight);
-    ctx.quadraticCurveTo(bgX, bgY + bgHeight, bgX, bgY + bgHeight - radius);
-    ctx.lineTo(bgX, bgY + radius);
-    ctx.quadraticCurveTo(bgX, bgY, bgX + radius, bgY);
-    ctx.closePath();
-
-    ctx.fillStyle = '#000000';
-    ctx.fill();
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.restore();
-
-    // Member count text
-    ctx.fillStyle = '#FFFFFF';
+    // Plain light grey text — no badge, no border.
+    ctx.fillStyle = '#C9C9C9';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
     ctx.shadowBlur = 3;
     ctx.shadowOffsetY = 1;
