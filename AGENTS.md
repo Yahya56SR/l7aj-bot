@@ -3,54 +3,56 @@
 ## Commands
 | Command | Purpose |
 |---------|---------|
-| `npm run dev` | `tsx watch src/index.ts` — restarts on code changes (dev) |
+| `npm run dev` | `tsx watch src/index.ts` — restarts on **source** changes only |
 | `npm start` | `tsx src/index.ts` — no build step |
 | `npm run build` | `tsc` → `dist/` |
 | `npm run serve` | `node dist/index.js` |
+| `npx tsc --noEmit` | Only verification in the repo — no tests, linter, or formatter |
 
-## Configuration
-- `config.json` — runtime config (edit by hand, via the in-Discord `/config` commands, or the web dashboard). **Gitignored — never commit real tokens.**
-- `.env` — optional `BOT_TOKEN`, `CLIENT_ID`, `GUILD_ID` overrides (dotenv; `config.json` is the fallback). See `.env.example`.
-- Dashboard env vars: `DASHBOARD_ENABLED` (default `true`), `DASHBOARD_HOST` (default `127.0.0.1`), `DASHBOARD_PORT` (default `3000`), `DASHBOARD_PASSWORD` (optional; required for non-loopback hosts).
-- `data/talaba.json` — JSON DB (XP, levels, voice minutes, tickets). Auto-created. **Gitignored.**
-- `dist/` — build output. **Gitignored.**
+`tsconfig.json` includes `src/**/*` only, so `scripts/` is never typechecked and can drift from the API it imports.
+
+## Config & secrets
+- `config.json` is runtime state and holds live secrets; `.env` overrides it with `BOT_TOKEN`, `CLIENT_ID`, `GUILD_ID`, `GEMINI_API_KEY`. Both are gitignored — never commit or print their contents.
+- Never write the config file directly. Use `updateConfig(mutator)` / `replaceConfig(raw)` from `src/config.ts`: they normalise, sanitise, persist, and swap the live object returned by `getConfig()`. `replaceConfig(..., { preserveSecrets: true })` keeps `__REDACTED__` placeholders.
+- Adding/renaming a config field touches: `BotConfig`, `DEFAULT_CONFIG`, `normalizeConfig`, `sanitizeConfig` (all `src/config.ts`), `config.example.json`, and the field lists in `dashboard/app.js`.
+- `token`/`clientId`/`guildId` are captured at startup, so a token change needs a restart; every other setting is live on save.
+- `data/talaba.json` — JSON DB (users + tickets) written synchronously, auto-created, gitignored. `data/fonts/` may hold a runtime-downloaded emoji font.
+- `.env` precedence: `process.env.BOT_TOKEN || cfg.token`; same for `GEMINI_API_KEY || automod.aiModeration.apiKey`.
 
 ## Architecture
-- Entry: `src/index.ts` — loads config, inits DB, registers slash commands to the guild, logs in.
-- Commands (`src/commands/`): `rank`, `leaderboard`, `reactionroles`, `roles` (button panels), `levels`, `xp`, `verify`, `config`, `tickets`.
-- Events (`src/events/`): `messageCreate` (XP), `voiceStateUpdate` + 1-min tick (voice XP), `messageReactionAdd/Remove` (reaction roles), `guildMemberAdd/Remove`.
-- Handlers (`src/handlers/`): `registerCommands` (guild-scoped), `buttons` (role panels + verification), `tickets` (panel/modal/transcript), `levelUp` (role rewards + announcement).
-- Utils (`src/utils/`): `level.ts` (MEE6 math), `rankcard.ts` + `rankEmbeds.ts` (PNG/embed fallback), `welcomecard.ts`, `automod.ts`, `discord.ts`, `fonts.ts`.
-- Dashboard (`src/dashboard/server.ts` + `dashboard/`): in-process HTTP server started before Discord login. `dashboard/` holds the vanilla HTML/CSS/JS UI (no build step, no framework); the server exposes a JSON API, serves those assets, and writes config through `replaceConfig()` in `src/config.ts`.
+- Entry `src/index.ts`: dotenv → `loadConfig()` → `initDb()` → `startDashboard()` → guild command registration → `login()`. The dashboard deliberately starts before login.
+- Ready handler is `clientReady` (not `ready`). It creates the 1-minute voice-XP interval and the 5-minute ticket auto-close sweeper, clearing any previous interval first so reconnects don't double-award.
+- Commands (`src/commands/`): `rank`, `leaderboard`, `reactionroles`, `roles` (button panels), `levels`, `xp`, `verify`, `config`, `tickets`. Events (`src/events/`): `messageCreate` (automod → XP), `voiceStateUpdate`, `messageReaction`, `guildMember`, `logging` (wires ~all guild events to `utils/logger.ts`). Handlers (`src/handlers/`): `registerCommands`, `buttons`, `tickets`, `levelUp`. Utils: `level`, `rankcard`/`rankEmbeds`, `welcomecard`, `automod`, `gemini-live`, `logger`, `fonts`, `discord`.
+- Interaction routing is manual in `src/index.ts`: modals → `ticket:*` buttons → other buttons (`verify:grant`/`verify:revoke`, `role:toggle:<roleId>`) → autocomplete → slash commands. New component namespaces must be wired there.
+- Log channel resolves to `config.logging.channelId` when set, otherwise `config.channels.logs`. Logging fails open (never blocks core functionality).
+- Paths for `config.json`, `data/`, fonts and dashboard assets resolve via `__dirname/..`, so both `tsx src/...` and `dist/` builds work from anywhere. Exception: `welcome.backgroundImage` resolves against `process.cwd()` — run the bot from the repo root.
+- XP: MEE6 math `5*L² + 50*L + 100`; random 15–25/msg with 60s cooldown, 5–8/voice minute, bots ignored by default. Rank cards are PNGs via `@napi-rs/canvas` with a text-embed fallback.
 
 ## Dashboard
-- Start the bot and open `http://127.0.0.1:3000`. It starts even when the token/login fails, so it can be used to fix a broken config.
-- `GET/PUT /api/config` — config with `token` and `automod.aiModeration.apiKey` redacted; `PUT` requires the revision hash and returns `409` if a slash command changed the file meanwhile.
-- `POST /api/secrets` — write-only token/Gemini key fields. `.env` overrides still win; a token change needs a restart.
-- `POST /api/actions/publish-role-panel` / `publish-ticket-panel` — create or edit the Discord panel message and save its `messageId`.
-- `POST /api/actions/test-welcome` / `test-goodbye`, `POST /api/ai/test` — save first, then send/classify.
-- Config saves run through `replaceConfig()` → `normalizeConfig()` + `sanitizeConfig()`, so both the web UI and the raw JSON editor produce a valid config and changes are live immediately.
-- Auth: loopback-only by default; `DASHBOARD_PASSWORD` enables a login with a 12-hour `HttpOnly; SameSite=Strict` cookie. Session state is in memory, so a restart signs everyone out.
+- `src/dashboard/server.ts` + plain HTML/CSS/JS in `dashboard/`. No build step: editing those files only needs a browser refresh, not a bot restart.
+- CSP is strict: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:`. No inline `<script>`, no CDN scripts/fonts — new JS must be a file under `dashboard/`.
+- Routes: `GET /api/session`, `POST /api/login|logout`, `GET /api/health|guild|stats|config`, `PUT /api/config`, `POST /api/secrets`, `POST /api/actions/reload-config|test-welcome|test-goodbye|publish-role-panel|publish-ticket-panel`, `POST /api/ai/test`.
+- `GET /api/config` omits `token` and returns the Gemini key as `__REDACTED__`. `PUT /api/config` requires the returned `revision` (sha256 of the live config, 16 chars) and returns `409` if a slash command changed it meanwhile. Secrets go only through `POST /api/secrets`.
+- Auth is loopback-only by default; a non-loopback `DASHBOARD_HOST` refuses to start without `DASHBOARD_PASSWORD`. Sessions are in memory (12h HttpOnly cookie), so a restart signs everyone out.
+- Dashboard actions that need Discord (publish/test) fail when the bot is not logged in, but the dashboard itself still starts — that is how a broken token gets fixed.
 
-## Key behaviors
-- XP: MEE6 parity — random 15–25 XP/message, 60s cooldown, 5–8 XP/voice minute. Curve: `5*L² + 50*L + 100` per level. Bots ignored by default.
-- Rank cards / leaderboard: PNG via `@napi-rs/canvas` (prebuilt binaries). Fonts in `assets/fonts/`. Falls back to text embed on canvas failure.
-- Level rewards: roles at milestones; lower tiers removed automatically.
-- Button role panels: unlimited panels, one button per role, toggle on click; panel message auto-updates.
-- Verification: single button granting a role; optional unverify button.
-- Tickets: panel + modal form fields, staff/ping roles, transcripts, auto-close.
-- Automod: URL/GIF/caps blocking with whitelists and ignored channels.
-- Welcome/goodbye: optional card image (PNG) or plain text.
+## AI moderation (Gemini Live)
+- `src/utils/gemini-live.ts` streams via `@google/genai` Live sessions; turn-based, so requests are serialised through a queue. Defaults: 15s timeout, queue 50, recycle socket after 20 turns or 5 minutes.
+- Verified model quirks (header comment): `gemini-3.8-live` closes with code 1007 if you ask for `responseModalities: [TEXT]` — request AUDIO plus `outputAudioTranscription` and read the transcript. `gemini-3.8-live` must NOT receive `thinkingConfig`; the `-extended-thinking` variant requires `thinkingLevel`.
+- Automod order: owner and moderation-permission bypass → ignored channels (skip everything) → bypass roles (skip regex, still AI) → URL/GIF/CAPS → Gemini. AI deletes the message, DMs the author, and alerts staff only at/above `confidenceThreshold`.
+- Fail-open everywhere: timeout, queue overflow, connection loss, or invalid JSON yields `null` → message allowed.
+
+## Scripts & benchmark
+- `npx tsx scripts/preview-welcome.ts` renders `preview-welcome.png` (gitignored).
+- `node scripts/moroccan_darija_ai_moderation_benchmark.js` runs the dependency-free curated benchmark (docs: `docs/README_moroccan_darija_ai_moderation_benchmark.md`). `npx tsx scripts/run_ai_moderation_benchmark.ts` needs `GEMINI_API_KEY`.
+- Trust `src/` over `scripts/`: benchmark/probe scripts predate the current `GeminiLiveModerator` options-object constructor and are not compiled.
+- Root-level `moroccan_darija_ai_moderation_benchmark.js`, `darija_arabizi_moderation_tests.js`, the zip and its README duplicate the benchmark; they differ from `scripts/` and `docs/`, which are the maintained copies.
 
 ## Discord requirements
-- Privileged intents (Developer Portal → Bot): **Server Members**, **Message Content**. (Presence is not used.)
-- Bot permissions: Manage Roles (must sit above any role it assigns), Send Messages, Read Message History, View Channels.
-- If role changes silently fail, check the bot's role position and its 401/token errors in the startup log.
+- Privileged intents (Developer Portal → Bot): **Server Members**, **Message Content**. Presence is unused.
+- Permissions: Manage Roles (must sit above every assigned role or changes fail silently), Send Messages, Read Message History, View Channels.
+- Login 401 = token reset/revoked or the client secret was used (both look like `xxx.yyy.zzz`). 403 = bot not in the guild.
 
-## Development notes
-- No test suite / linter / formatter — plain TypeScript, `tsc --strict`. Typecheck: `npx tsc --noEmit`.
-- Dashboard assets are plain files in `dashboard/` (served as-is, no bundler). When adding UI features, keep the CSP in mind: external scripts only (`script-src 'self'`), inline styles allowed.
-- Slash commands re-register to `guildId` on every start — run `npm start` after adding commands.
-- `config.json` is read once at startup; in-Discord slash-command changes write to disk but do **not** restart the bot. `npm run dev` only restarts on code changes.
-- Token vs client secret: both look like `xxx.yyy.zzz`. Only the Bot Token works; the startup log reports a 401.
-- Line endings: `.gitattributes` forces LF (`eol=lf`) even on Windows — match existing files when editing.
+## Repo notes
+- Git: commits use `type(scope): summary` (e.g. `fix(voice): ...`) and go straight to `main`; `.gitattributes` enforces LF — keep it when editing.
+- `.kilo/worktrees/brash-asiago/` is an ignored git worktree pinned to an older commit with stale copies of every file. Ignore it in searches; the repo root is current.
