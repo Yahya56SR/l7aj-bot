@@ -12,7 +12,7 @@
  * correlate responses correctly.
  */
 
-import { GoogleGenAI, Modality } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
 export interface AiVerdict {
   flagged: boolean;
@@ -110,11 +110,7 @@ export class GeminiLiveModerator {
         model: this.model,
         config: {
           systemInstruction: { parts: [{ text: this.systemPrompt }] },
-          generationConfig: {
-            temperature: 0,
-            responseMimeType: 'application/json',
-          },
-          responseModalities: [Modality.TEXT],
+          temperature: 0,
         },
         callbacks: {
           onopen: () => {
@@ -168,12 +164,21 @@ export class GeminiLiveModerator {
         for (const part of modelTurn.parts) {
           if (part.text) {
             this.currentResponseText += part.text;
+            console.debug('[Gemini Live] Received text chunk', {
+              chunkLength: part.text.length,
+              accumulatedLength: this.currentResponseText.length,
+            });
           }
         }
       }
 
       if (serverContent.turnComplete) {
+        console.debug('[Gemini Live] Turn complete, raw response', {
+          rawText: this.currentResponseText,
+          rawLength: this.currentResponseText.length,
+        });
         const verdict = this.parseVerdict(this.currentResponseText);
+        console.debug('[Gemini Live] Parsed verdict', verdict);
         this.currentResponseText = '';
         this.resolvePending(verdict);
       }
