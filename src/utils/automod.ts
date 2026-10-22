@@ -54,7 +54,7 @@ function hasExcessiveCaps(content: string, minLength: number, maxPercent: number
 }
 
 /** Check if member has any of the bypass roles */
-function hasBypassRole(message: Message, bypassRoles: string[]): boolean {
+function hasBypassRoleFn(message: Message, bypassRoles: string[]): boolean {
   if (!message.member || !message.guild) return false;
   return message.member.roles.cache.some((role) => bypassRoles.includes(role.id));
 }
@@ -203,14 +203,21 @@ export async function runAutomod(message: Message): Promise<boolean> {
   const cfg = getConfig();
   const automod = cfg.automod;
 
-  // Check if channel is ignored
+  // Check if channel is ignored (ignored channels skip everything, including AI mod)
   if (automod.ignoredChannels?.includes(message.channelId)) return false;
 
-  // Check if user has bypass role
-  if (automod.bypassRoles?.length && hasBypassRole(message, automod.bypassRoles)) return false;
+  // Check if user has bypass role — bypass roles skip regex checks (URL/GIF/caps)
+  // but are still subject to AI moderation.
+  const hasBypassRole = automod.bypassRoles?.length && hasBypassRoleFn(message, automod.bypassRoles);
+  console.debug('[Automod] Bypass role check', {
+    messageId: message.id,
+    bypassRoles: automod.bypassRoles?.length ?? 0,
+    hasBypassRole: Boolean(hasBypassRole),
+    note: hasBypassRole ? 'skipping regex checks, AI mod still runs' : 'all checks run',
+  });
 
-  // Check for attachment-only channels
-  if (automod.attachmentOnlyChannels?.includes(message.channelId)) {
+  // Check for attachment-only channels (bypass roles skip this)
+  if (!hasBypassRole && automod.attachmentOnlyChannels?.includes(message.channelId)) {
     if (!hasAttachments(message)) {
       try {
         await message.delete();
@@ -223,8 +230,8 @@ export async function runAutomod(message: Message): Promise<boolean> {
     }
   }
 
-  // Check for URLs
-  if (automod.blockUrls && hasUrl(message.content)) {
+  // Check for URLs (bypass roles skip this)
+  if (!hasBypassRole && automod.blockUrls && hasUrl(message.content)) {
     try {
       await message.delete();
     } catch {
@@ -235,8 +242,8 @@ export async function runAutomod(message: Message): Promise<boolean> {
     return true;
   }
 
-  // Check for GIF attachments
-  if (automod.blockGifs && isGifAttachment(message)) {
+  // Check for GIF attachments (bypass roles skip this)
+  if (!hasBypassRole && automod.blockGifs && isGifAttachment(message)) {
     try {
       await message.delete();
     } catch {
@@ -247,8 +254,8 @@ export async function runAutomod(message: Message): Promise<boolean> {
     return true;
   }
 
-  // Check for GIF URLs (only if not whitelisted)
-  if (automod.blockGifs && hasGifUrl(message.content)) {
+  // Check for GIF URLs (bypass roles skip this)
+  if (!hasBypassRole && automod.blockGifs && hasGifUrl(message.content)) {
     const isWhitelisted = automod.gifWhitelistRoles?.length && hasGifWhitelistRole(message, automod.gifWhitelistRoles);
     if (!isWhitelisted) {
       try {
@@ -262,8 +269,8 @@ export async function runAutomod(message: Message): Promise<boolean> {
     }
   }
 
-  // Check for excessive caps
-  if (automod.blockCaps && hasExcessiveCaps(message.content, automod.capsMinLength, automod.capsMaxPercent)) {
+  // Check for excessive caps (bypass roles skip this)
+  if (!hasBypassRole && automod.blockCaps && hasExcessiveCaps(message.content, automod.capsMinLength, automod.capsMaxPercent)) {
     try {
       await message.delete();
     } catch {
@@ -274,7 +281,7 @@ export async function runAutomod(message: Message): Promise<boolean> {
     return true;
   }
 
-  // LLM-based moderation (runs last so cheap regex checks short-circuit first)
+  // LLM-based moderation (runs for everyone, including bypass roles)
   if (await runAiModeration(message)) return true;
 
   return false;

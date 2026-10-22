@@ -89,7 +89,7 @@ export const data = new SlashCommandBuilder()
       .addSubcommand((sub) =>
         sub
           .setName('bypass')
-          .setDescription('Manage roles that bypass all automod checks')
+          .setDescription('Manage roles that bypass regex automod checks (still AI-moderated)')
           .addStringOption((opt) =>
             opt
               .setName('action')
