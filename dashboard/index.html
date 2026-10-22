@@ -3,13 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#06070c" />
     <title>TALABA &lt;3 · Dashboard</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div id="login" class="login-screen hidden">
       <form id="login-form" class="login-card" autocomplete="on">
-        <div class="login-mark">T</div>
+        <div class="login-brand">
+          <div class="login-mark">T</div>
+          <span class="eyebrow">Control panel</span>
+        </div>
         <h1>TALABA &lt;3 Dashboard</h1>
         <p class="muted">Sign in to edit the bot configuration.</p>
         <input
@@ -26,10 +31,15 @@
     </div>
 
     <div id="app" class="app hidden">
-      <aside class="sidebar">
+      <div class="sidebar-backdrop" data-action="close-sidebar" aria-hidden="true"></div>
+
+      <aside class="sidebar" aria-label="Sidebar">
         <div class="brand">
-          <span class="brand-mark">T</span>
-          <div>
+          <span class="brand-mark">
+            <img id="brand-avatar" class="hidden" alt="" />
+            <span id="brand-letter">T</span>
+          </span>
+          <div class="brand-text">
             <strong>TALABA &lt;3</strong>
             <small>Bot dashboard</small>
           </div>
@@ -43,17 +53,33 @@
             <span class="status-text">Connecting…</span>
           </div>
           <div id="config-path" class="tiny muted"></div>
-          <button class="btn ghost small" data-action="logout">Sign out</button>
+          <button class="btn ghost small wide" data-action="logout">Sign out</button>
         </div>
       </aside>
 
       <main class="main">
         <header class="topbar">
-          <div class="topbar-title">
-            <h1 id="section-title">Overview</h1>
-            <p id="section-subtitle" class="muted"></p>
+          <div class="topbar-left">
+            <button
+              class="btn icon menu-btn"
+              data-action="toggle-sidebar"
+              aria-label="Open navigation"
+              aria-expanded="false"
+            >
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                <path d="M4 7h16M4 12h16M4 17h16" />
+              </svg>
+            </button>
+            <div class="topbar-title">
+              <h1 id="section-title">Overview</h1>
+              <p id="section-subtitle" class="muted"></p>
+            </div>
           </div>
           <div class="topbar-actions">
+            <span id="topbar-status" class="pill status-pill">
+              <span class="dot"></span>
+              <span class="status-label">Connecting…</span>
+            </span>
             <span id="dirty-indicator" class="pill warn hidden">Unsaved changes</span>
             <button class="btn ghost" data-action="reload">Reload</button>
             <button class="btn primary" data-action="save">Save changes</button>

@@ -45,17 +45,49 @@ const BUTTON_STYLES = [
   { value: 4, label: 'Danger (red)' },
 ];
 
+const ICONS = {
+  overview:
+    '<rect x="3" y="3" width="7.5" height="9.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="5.5" rx="2"/><rect x="13.5" y="12" width="7.5" height="9" rx="2"/><rect x="3" y="16" width="7.5" height="5" rx="2"/>',
+  stats: '<path d="M3 3v18h18"/><path d="M7 15l4-5 3.2 3.2L20 6.5"/>',
+  xp: '<path d="M13 2 4.6 13.4H11l-1 8.6 8.4-11.4H12z"/>',
+  channels: '<path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/>',
+  greetings:
+    '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-3.8-.8L3 21l1.9-5.1A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/><path d="M8.5 11.5h7M12 8v7"/>',
+  autoreact:
+    '<path d="M12 3.2l1.9 4.6 4.6 1.9-4.6 1.9L12 16.2l-1.9-4.6L5.5 9.7l4.6-1.9z"/><path d="M18 15.5l.9 2.1 2.1.9-2.1.9L18 21.5l-.9-2.1-2.1-.9 2.1-.9z"/>',
+  roles:
+    '<path d="M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.6" cy="7.6" r="1.4"/>',
+  tickets:
+    '<path d="M3 9V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a3 3 0 0 0 0 6v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a3 3 0 0 0 0-6z"/><path d="M13 5v14"/>',
+  shield:
+    '<path d="M12 3 5 6v6c0 4.5 3 7.7 7 9 4-1.3 7-4.5 7-9V6z"/><path d="M9.2 12.2l2 2 3.6-3.9"/>',
+  advanced:
+    '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  users:
+    '<circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5.6a3.4 3.4 0 0 1 0 6.8"/><path d="M18 20a5.6 5.6 0 0 0-2-4.3"/>',
+  history: '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/><path d="M12 7.5V12l3 2"/>',
+  spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/>',
+  bot: '<rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M8.5 13h.01M15.5 13h.01M9.5 17h5"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  link: '<path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.2-1.2"/>',
+};
+
+function icon(name) {
+  const paths = ICONS[name] || ICONS.spark;
+  return `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+}
+
 const sections = [
-  { id: 'overview', label: 'Overview', icon: '◈', subtitle: 'Bot status and quick toggles', render: renderOverview },
-  { id: 'xp', label: 'XP & Levels', icon: '⚡', subtitle: 'Message/voice rates, cooldown and level rewards', render: renderXp },
-  { id: 'channels', label: 'Channels & Logging', icon: '#', subtitle: 'Announcements and server event logs', render: renderChannels },
-  { id: 'greetings', label: 'Welcome & Goodbye', icon: '👋', subtitle: 'Join and leave messages, cards and tests', render: renderGreetings },
-  { id: 'automod', label: 'AutoMod & AI', icon: '🛡', subtitle: 'Filters, exemptions and Gemini moderation', render: renderAutomod },
-  { id: 'roles', label: 'Role Panels', icon: '🎭', subtitle: 'Button panels, reaction roles and verification', render: renderRoles },
-  { id: 'tickets', label: 'Tickets', icon: '🎫', subtitle: 'Panels, forms, staff roles and auto-close', render: renderTickets },
-  { id: 'autoreact', label: 'Auto-reactions', icon: '✨', subtitle: 'Emojis added automatically per channel', render: renderAutoReact },
-  { id: 'stats', label: 'Data & Stats', icon: '📈', subtitle: 'XP leaderboard and ticket history', render: renderStats },
-  { id: 'advanced', label: 'Advanced', icon: '🔧', subtitle: 'Secrets, raw JSON and environment', render: renderAdvanced },
+  { id: 'overview', label: 'Overview', icon: 'overview', group: 'General', subtitle: 'Bot status and quick toggles', render: renderOverview },
+  { id: 'stats', label: 'Data & Stats', icon: 'stats', group: 'General', subtitle: 'XP leaderboard and ticket history', render: renderStats },
+  { id: 'xp', label: 'XP & Levels', icon: 'xp', group: 'Engagement', subtitle: 'Message/voice rates, cooldown and level rewards', render: renderXp },
+  { id: 'channels', label: 'Channels & Logging', icon: 'channels', group: 'Engagement', subtitle: 'Announcements and server event logs', render: renderChannels },
+  { id: 'greetings', label: 'Welcome & Goodbye', icon: 'greetings', group: 'Engagement', subtitle: 'Join and leave messages, cards and tests', render: renderGreetings },
+  { id: 'autoreact', label: 'Auto-reactions', icon: 'autoreact', group: 'Engagement', subtitle: 'Emojis added automatically per channel', render: renderAutoReact },
+  { id: 'roles', label: 'Role Panels', icon: 'roles', group: 'Community', subtitle: 'Button panels, reaction roles and verification', render: renderRoles },
+  { id: 'tickets', label: 'Tickets', icon: 'tickets', group: 'Community', subtitle: 'Panels, forms, staff roles and auto-close', render: renderTickets },
+  { id: 'automod', label: 'AutoMod & AI', icon: 'shield', group: 'Protection', subtitle: 'Filters, exemptions and Gemini moderation', render: renderAutomod },
+  { id: 'advanced', label: 'Advanced', icon: 'advanced', group: 'System', subtitle: 'Secrets, raw JSON and environment', render: renderAdvanced },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -179,12 +211,14 @@ async function logout() {
   state.config = null;
   state.saved = null;
   appEl.classList.add('hidden');
+  setSidebarOpen(false);
   showLogin();
 }
 
 function showLogin(message) {
   appEl.classList.add('hidden');
   loginEl.classList.remove('hidden');
+  setSidebarOpen(false);
   const errorEl = document.getElementById('login-error');
   errorEl.textContent = message || '';
   document.getElementById('login-password').focus();
@@ -229,6 +263,17 @@ function bindEvents() {
   document.addEventListener('input', onFieldChange);
   document.addEventListener('change', onFieldChange);
   document.getElementById('login-form').addEventListener('submit', onLogin);
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      setSidebarOpen(false);
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      if (isDirty() && !state.saving) saveConfig();
+    }
+  });
 
   window.addEventListener('hashchange', () => {
     const id = decodeURIComponent(window.location.hash.slice(1));
@@ -288,6 +333,12 @@ async function onDocumentClick(event) {
         return;
       case 'reload':
         await reloadAll();
+        return;
+      case 'toggle-sidebar':
+        setSidebarOpen(!document.body.classList.contains('nav-open'));
+        return;
+      case 'close-sidebar':
+        setSidebarOpen(false);
         return;
       case 'logout':
         await logout();
@@ -1006,12 +1057,26 @@ function chipList(path, ids, kind) {
     </div>`;
 }
 
-function statCard(label, value, sub) {
-  return `<div class="stat">
-    <div class="stat-label">${esc(label)}</div>
+function statCard(label, value, sub, iconName = '', tone = 'violet') {
+  return `<div class="stat tone-${tone}">
+    <div class="stat-top">
+      <span class="stat-label">${esc(label)}</span>
+      ${iconName ? `<span class="stat-icon">${icon(iconName)}</span>` : ''}
+    </div>
     <div class="stat-value">${esc(value)}</div>
     <div class="stat-sub">${esc(sub)}</div>
   </div>`;
+}
+
+function formatUptime(seconds) {
+  if (seconds == null || seconds < 0) return '—';
+  if (seconds < 60) return `${Math.floor(seconds)}s`;
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
 }
 
 function emptyRow(cols, text) {
@@ -1026,10 +1091,10 @@ function discordMessageLink(channelId, messageId) {
 
 function messageNote(channelId, messageId, hint) {
   if (!messageId) {
-    return `<div class="section-note"><span>ℹ️</span><span>${esc(hint)}</span></div>`;
+    return `<div class="section-note">${icon('info')}<span>${esc(hint)}</span></div>`;
   }
   const link = discordMessageLink(channelId, messageId);
-  return `<div class="section-note"><span>🔗</span><span>Message ID <code>${esc(messageId)}</code>${
+  return `<div class="section-note">${icon('link')}<span>Message ID <code>${esc(messageId)}</code>${
     link ? ` · <a href="${esc(link)}" target="_blank" rel="noreferrer">open in Discord</a>` : ''
   }</span></div>`;
 }
@@ -1045,11 +1110,56 @@ function renderOverview() {
   const bot = health.bot || {};
   const guild = health.guild || {};
 
+  const botAvatar = bot.avatar
+    ? `<img src="${esc(bot.avatar)}" alt="" loading="lazy">`
+    : `<span>${esc((bot.tag || 'T').slice(0, 1).toUpperCase())}</span>`;
+  const guildIcon = guild.icon ? `<img class="hero-guild-icon" src="${esc(guild.icon)}" alt="" loading="lazy">` : '';
+
+  const hero = `<section class="hero">
+    <div class="hero-identity">
+      <span class="hero-avatar ${bot.ready ? 'is-online' : ''}">${botAvatar}</span>
+      <div class="hero-text">
+        <span class="eyebrow">${bot.ready ? 'Bot connected' : 'Not connected'}</span>
+        <h2>${esc(bot.tag || 'TALABA <3')}</h2>
+        <div class="hero-tags">
+          <span class="pill ${bot.ready ? 'ok' : 'bad'}"><span class="dot"></span>${bot.ready ? 'Online' : 'Offline'}</span>
+          ${
+            guild.name
+              ? `<span class="pill">${guildIcon}<span>${esc(guild.name)}</span></span>`
+              : '<span class="pill warn">No server connected</span>'
+          }
+        </div>
+      </div>
+    </div>
+    <div class="hero-metrics">
+      <div class="hero-metric"><span>Ping</span><strong>${bot.ping != null && bot.ping >= 0 ? `${esc(bot.ping)} ms` : '—'}</strong></div>
+      <div class="hero-metric"><span>Uptime</span><strong>${esc(formatUptime(bot.uptimeSeconds))}</strong></div>
+      <div class="hero-metric"><span>Members</span><strong>${guild.memberCount ? esc(guild.memberCount) : '—'}</strong></div>
+      <div class="hero-metric"><span>Open tickets</span><strong>${stats ? esc(stats.tickets.open) : '—'}</strong></div>
+    </div>
+  </section>`;
+
+  const automodTone = cfg.automod.aiModeration.enabled
+    ? 'violet'
+    : cfg.automod.blockUrls || cfg.automod.blockGifs || cfg.automod.blockCaps
+      ? 'amber'
+      : 'pink';
+  const automodValue = cfg.automod.aiModeration.enabled
+    ? 'AI active'
+    : cfg.automod.blockUrls || cfg.automod.blockGifs || cfg.automod.blockCaps
+      ? 'Filters'
+      : 'Off';
+  const automodSub = cfg.automod.aiModeration.enabled
+    ? 'Gemini moderation active'
+    : cfg.automod.blockUrls || cfg.automod.blockGifs || cfg.automod.blockCaps
+      ? 'Regex filters only'
+      : 'No moderation enabled';
+
   const statusCards = `<div class="stats">
-    ${statCard('Bot', bot.ready ? 'Online' : 'Offline', bot.tag || 'not logged in')}
-    ${statCard('Server', guild.name || '—', guild.memberCount ? `${guild.memberCount} members` : 'not connected')}
-    ${statCard('Tracked members', stats ? stats.xp.ranked : '—', 'members with XP')}
-    ${statCard('Open tickets', stats ? stats.tickets.open : '—', `${stats ? stats.tickets.total : 0} all time`)}
+    ${statCard('Tracked members', stats ? stats.xp.ranked : '—', 'members with XP', 'users', 'blue')}
+    ${statCard('Open tickets', stats ? stats.tickets.open : '—', 'open or claimed', 'tickets', 'violet')}
+    ${statCard('All-time tickets', stats ? stats.tickets.total : '—', 'since the bot started', 'history', 'green')}
+    ${statCard('AutoMod', automodValue, automodSub, 'shield', automodTone)}
   </div>`;
 
   const quickToggles = [
@@ -1085,16 +1195,17 @@ function renderOverview() {
     ),
   ].join('');
 
-  return `${statusCards}
+  return `${hero}
+    ${statusCards}
     ${card('Quick toggles', quickToggles, {
       subtitle: 'Flip a switch, then press “Save changes” — no restart needed.',
     })}
-    ${card('Live editing', `<div class="section-note"><span>⚡</span><span>
+    ${card('Live editing', `<div class="section-note">${icon('spark')}<span>
       <strong>Changes apply instantly.</strong> The dashboard runs inside the bot process, so saving writes
       <code>${esc(state.meta.configPath || 'config.json')}</code> and updates the running config at the same time.
       Slash commands write to the same file; if one runs while you edit, the dashboard asks you to reload instead of overwriting it.
     </span></div>
-    <div class="section-note"><span>🔒</span><span>
+    <div class="section-note">${icon('shield')}<span>
       The bot token and Gemini API key are redacted in the API. Binds to
       <code>${esc((health.dashboard && health.dashboard.host) || '127.0.0.1')}:${esc((health.dashboard && health.dashboard.port) || 3000)}</code>
       ${health.dashboard && health.dashboard.passwordRequired ? 'and requires a password.' : 'with no password (local access only).'}
@@ -1135,7 +1246,7 @@ function renderXp() {
       field('Minimum XP per message', numberInput('xp.perMessageMin', xp.perMessageMin, { min: 0, max: 10000 })),
       field('Maximum XP per message', numberInput('xp.perMessageMax', xp.perMessageMax, { min: 0, max: 10000 })),
       field('Cooldown (seconds)', numberInput('xp.cooldownSeconds', xp.cooldownSeconds, { min: 0, max: 86400 }), 'One XP grant per member per cooldown.'),
-      field('Bots earn no XP', toggle('xp.ignoreBots', xp.ignoreBots, 'Ignore bot accounts', 'Recommended: bots should not rank against members.')),
+      toggle('xp.ignoreBots', xp.ignoreBots, 'Bots earn no XP', 'Recommended: bots should not rank against members.'),
     ], 2))}
 
     ${card('Voice XP', grid([
@@ -1279,7 +1390,7 @@ function renderAutomod() {
       ${field('System prompt', `<textarea class="input" data-path="automod.aiModeration.systemPrompt" data-type="string" rows="11">${esc(
         ai.systemPrompt,
       )}</textarea>`, 'Plain-English policy. The model must reply with JSON; the bot parses the verdict.')}
-      <div class="section-note"><span>🧪</span><span>
+      <div class="section-note">${icon('info')}<span>
         <strong>Dry run.</strong> Saves the current settings, classifies the text below and shows the verdict without deleting anything.
       </span></div>
       <div class="field">
@@ -1331,7 +1442,7 @@ function renderRoles() {
       ${state.guild.available ? optionsSelect(roleOptions(true, '— pick a role —'), { id: 'new-mapping-role' }) : '<input class="input" id="new-mapping-role" placeholder="Role ID">'}
       <button class="btn small" data-action="add-mapping">Add mapping</button>
     </div>
-    <div class="section-note"><span>ℹ️</span><span>Reaction roles work on the saved message. Create the message with <code>/reactionroles setup</code>.</span></div>`,
+    <div class="section-note">${icon('info')}<span>Reaction roles work on the saved message. Create the message with <code>/reactionroles setup</code>.</span></div>`,
     { subtitle: 'React to a message to grant a role' });
 
   const panelCards = cfg.roles.panels.length
@@ -1342,7 +1453,7 @@ function renderRoles() {
     field('Channel', channelSelect('verification.channelId', cfg.verification.channelId)),
     field('Message ID', textInput('verification.messageId', cfg.verification.messageId, { placeholder: 'Right-click → Copy Message ID' })),
     field('Role granted', roleSelect('verification.roleId', cfg.verification.roleId)),
-    field('Show unverify button', toggle('verification.showUnverify', cfg.verification.showUnverify, 'Allow members to remove verification')),
+    toggle('verification.showUnverify', cfg.verification.showUnverify, 'Show unverify button', 'Allow members to remove verification'),
   ], 2)}
     ${field('Embed title', textInput('verification.title', cfg.verification.title))}
     ${field('Embed description', textarea('verification.description', cfg.verification.description, { rows: 2 }))}
@@ -1591,10 +1702,10 @@ function renderStats() {
       <span class="muted tiny">Read from data/talaba.json — not editable here.</span>
     </div>
     <div class="stats">
-      ${statCard('Ranked members', stats.xp.ranked, 'have earned XP')}
-      ${statCard('All-time members', stats.xp.totalMembers, 'joins tracked by the bot')}
-      ${statCard('Open tickets', stats.tickets.open, 'open or claimed')}
-      ${statCard('Total tickets', stats.tickets.total, 'all time')}
+      ${statCard('Ranked members', stats.xp.ranked, 'have earned XP', 'users', 'blue')}
+      ${statCard('All-time members', stats.xp.totalMembers, 'joins tracked by the bot', 'history', 'violet')}
+      ${statCard('Open tickets', stats.tickets.open, 'open or claimed', 'tickets', 'amber')}
+      ${statCard('Total tickets', stats.tickets.total, 'all time', 'spark', 'green')}
     </div>
     ${card('XP leaderboard', `<div class="table-wrap"><table>
         <thead><tr><th>#</th><th>Member</th><th>Level</th><th>XP</th><th>Voice</th></tr></thead>
@@ -1666,14 +1777,40 @@ function renderAdvanced() {
 /* ------------------------------------------------------------------ */
 
 function renderNav() {
-  navEl.innerHTML = sections
+  const groups = [];
+  for (const section of sections) {
+    let group = groups.find((entry) => entry.name === section.group);
+    if (!group) {
+      group = { name: section.group, items: [] };
+      groups.push(group);
+    }
+    group.items.push(section);
+  }
+
+  navEl.innerHTML = groups
     .map(
-      (section) => `<button class="nav-item ${section.id === state.active ? 'active' : ''}" data-nav="${section.id}" title="${esc(section.label)}">
-        <span class="nav-icon">${section.icon}</span>
-        <span class="nav-label">${esc(section.label)}</span>
-      </button>`,
+      (group) => `<div class="nav-group">
+        <span class="nav-group-label">${esc(group.name)}</span>
+        ${group.items
+          .map((section) => {
+            const active = section.id === state.active;
+            return `<button class="nav-item ${active ? 'active' : ''}" data-nav="${section.id}" title="${esc(section.label)}"${
+              active ? ' aria-current="page"' : ''
+            }>
+              <span class="nav-icon">${icon(section.icon)}</span>
+              <span class="nav-label">${esc(section.label)}</span>
+            </button>`;
+          })
+          .join('')}
+      </div>`,
     )
     .join('');
+}
+
+function setSidebarOpen(open) {
+  document.body.classList.toggle('nav-open', open);
+  const button = document.querySelector('.menu-btn');
+  if (button) button.setAttribute('aria-expanded', String(open));
 }
 
 function renderActive(resetScroll = false) {
@@ -1682,9 +1819,13 @@ function renderActive(resetScroll = false) {
 
   document.getElementById('section-title').textContent = section.label;
   document.getElementById('section-subtitle').textContent = section.subtitle || '';
+  document.title = `${section.label} · TALABA <3`;
 
   const scrollY = window.scrollY;
   contentEl.innerHTML = section.render();
+  contentEl.classList.remove('swap');
+  void contentEl.offsetWidth;
+  contentEl.classList.add('swap');
   updatePreviews();
   updateDirty();
 
@@ -1706,6 +1847,7 @@ function setActive(id, updateHash) {
   if (updateHash && window.location.hash !== `#${id}`) {
     history.replaceState(null, '', `#${id}`);
   }
+  setSidebarOpen(false);
   renderNav();
   renderActive(true);
 }
@@ -1729,6 +1871,28 @@ function updateStatus() {
   if (text) {
     const guild = health.guild && health.guild.name ? ` · ${health.guild.name}` : '';
     text.textContent = ready ? `Online${guild}` : 'Bot offline';
+  }
+
+  const topbarStatus = document.getElementById('topbar-status');
+  if (topbarStatus) {
+    topbarStatus.classList.toggle('ok', ready);
+    topbarStatus.classList.toggle('bad', !ready);
+    const label = topbarStatus.querySelector('.status-label');
+    if (label) label.textContent = ready ? 'Bot online' : 'Bot offline';
+  }
+
+  const avatar = document.getElementById('brand-avatar');
+  const letter = document.getElementById('brand-letter');
+  const avatarUrl = health.bot && health.bot.avatar;
+  if (avatar && letter) {
+    if (avatarUrl) {
+      avatar.src = avatarUrl;
+      avatar.classList.remove('hidden');
+      letter.classList.add('hidden');
+    } else {
+      avatar.classList.add('hidden');
+      letter.classList.remove('hidden');
+    }
   }
 }
 
