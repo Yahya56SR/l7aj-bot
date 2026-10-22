@@ -7,6 +7,7 @@ import {
 } from 'discord.js';
 import { getConfig, updateConfig } from '../config';
 import { GeminiLiveModerator } from '../utils/gemini-live';
+import { logConfigChange } from '../utils/logger';
 
 export const data = new SlashCommandBuilder()
   .setName('config')
@@ -317,6 +318,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     updateConfig((c) => {
       c.channels.logs = channel.id;
     });
+    await logConfigChange(
+      interaction,
+      `Server logging channel set to ${channel}.`,
+      interaction.client as { channels: { cache: Map<string, any> } },
+    ).catch((err) => console.error('[Logging] config change error:', err));
     await interaction.reply({ content: `✅ Server logging channel set to ${channel}.`, ephemeral: true });
     return;
   }
@@ -442,6 +448,11 @@ async function handleAutomodConfig(interaction: ChatInputCommandInteraction, sub
       updateConfig((c) => {
         (c.automod as any)[feature] = enabled;
       });
+      await logConfigChange(
+        interaction,
+        `Automod **${feature}** ${enabled ? 'enabled' : 'disabled'}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ Automod **${feature}** ${enabled ? 'enabled' : 'disabled'}.`, ephemeral: true });
       break;
     }
@@ -452,6 +463,11 @@ async function handleAutomodConfig(interaction: ChatInputCommandInteraction, sub
         if (capsMinLength !== null) c.automod.capsMinLength = capsMinLength;
         if (capsMaxPercent !== null) c.automod.capsMaxPercent = capsMaxPercent;
       });
+      await logConfigChange(
+        interaction,
+        `Automod thresholds updated (caps min length: ${capsMinLength ?? 'unchanged'}, max %: ${capsMaxPercent ?? 'unchanged'}).`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: '✅ Automod thresholds updated.', ephemeral: true });
       break;
     }
@@ -467,6 +483,11 @@ async function handleAutomodConfig(interaction: ChatInputCommandInteraction, sub
           if (idx >= 0) list.splice(idx, 1);
         }
       });
+      await logConfigChange(
+        interaction,
+        `Automod GIF whitelist role ${action === 'add' ? 'added' : 'removed'}: ${role}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ Role ${role} ${action === 'add' ? 'added to' : 'removed from'} GIF whitelist.`, ephemeral: true });
       break;
     }
@@ -482,6 +503,11 @@ async function handleAutomodConfig(interaction: ChatInputCommandInteraction, sub
           if (idx >= 0) list.splice(idx, 1);
         }
       });
+      await logConfigChange(
+        interaction,
+        `Automod ignored channel ${action === 'add' ? 'added' : 'removed'}: ${channel}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ Channel ${channel} ${action === 'add' ? 'added to' : 'removed from'} ignored channels.`, ephemeral: true });
       break;
     }
@@ -497,6 +523,11 @@ async function handleAutomodConfig(interaction: ChatInputCommandInteraction, sub
           if (idx >= 0) list.splice(idx, 1);
         }
       });
+      await logConfigChange(
+        interaction,
+        `Automod bypass role ${action === 'add' ? 'added' : 'removed'}: ${role}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ Role ${role} ${action === 'add' ? 'added to' : 'removed from'} bypass roles.`, ephemeral: true });
       break;
     }
@@ -512,6 +543,11 @@ async function handleAutomodConfig(interaction: ChatInputCommandInteraction, sub
           if (idx >= 0) list.splice(idx, 1);
         }
       });
+      await logConfigChange(
+        interaction,
+        `Automod attachment-only channel ${action === 'add' ? 'added' : 'removed'}: ${channel}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ Channel ${channel} ${action === 'add' ? 'added to' : 'removed from'} attachment-only channels.`, ephemeral: true });
       break;
     }
@@ -520,6 +556,11 @@ async function handleAutomodConfig(interaction: ChatInputCommandInteraction, sub
       updateConfig((c) => {
         c.automod.modLogsChannelId = channel.id;
       });
+      await logConfigChange(
+        interaction,
+        `Automod mod-logs channel set to ${channel}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ Mod-logs channel set to ${channel}.`, ephemeral: true });
       break;
     }
@@ -539,6 +580,11 @@ async function handleAutomodAiConfig(interaction: ChatInputCommandInteraction): 
       updateConfig((c) => {
         c.automod.aiModeration.enabled = enabled;
       });
+      await logConfigChange(
+        interaction,
+        `AI moderation ${enabled ? 'enabled' : 'disabled'}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ AI moderation ${enabled ? 'enabled' : 'disabled'}.`, ephemeral: true });
       break;
     }
@@ -547,6 +593,11 @@ async function handleAutomodAiConfig(interaction: ChatInputCommandInteraction): 
       updateConfig((c) => {
         c.automod.aiModeration.model = model;
       });
+      await logConfigChange(
+        interaction,
+        `AI moderation model set to \`${model}\`.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ AI moderation model set to \`${model}\`.`, ephemeral: true });
       break;
     }
@@ -555,6 +606,11 @@ async function handleAutomodAiConfig(interaction: ChatInputCommandInteraction): 
       updateConfig((c) => {
         c.automod.aiModeration.systemPrompt = prompt;
       });
+      await logConfigChange(
+        interaction,
+        'AI moderation system prompt updated.',
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: '✅ AI moderation system prompt updated.', ephemeral: true });
       break;
     }
@@ -563,6 +619,11 @@ async function handleAutomodAiConfig(interaction: ChatInputCommandInteraction): 
       updateConfig((c) => {
         c.automod.aiModeration.confidenceThreshold = threshold;
       });
+      await logConfigChange(
+        interaction,
+        `AI moderation confidence threshold set to \`${threshold}\`.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ AI moderation confidence threshold set to \`${threshold}\`.`, ephemeral: true });
       break;
     }
@@ -647,6 +708,11 @@ async function handleAutoReactConfig(interaction: ChatInputCommandInteraction, s
         c.autoReactions.push({ channelId: channel.id, emojis });
       });
 
+      await logConfigChange(
+        interaction,
+        `Auto-reactions added to ${channel} with emojis: ${emojis.join(' ')}`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ Added auto-reactions to ${channel} with emojis: ${emojis.join(' ')}`, ephemeral: true });
       break;
     }
@@ -655,6 +721,11 @@ async function handleAutoReactConfig(interaction: ChatInputCommandInteraction, s
       updateConfig((c) => {
         c.autoReactions = c.autoReactions.filter((ar) => ar.channelId !== channel.id);
       });
+      await logConfigChange(
+        interaction,
+        `Auto-reactions removed from ${channel}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ Removed auto-reactions from ${channel}.`, ephemeral: true });
       break;
     }
@@ -681,6 +752,11 @@ async function handleAutoReactConfig(interaction: ChatInputCommandInteraction, s
         }
       });
 
+      await logConfigChange(
+        interaction,
+        `Auto-reactions updated for ${channel} with emojis: ${emojis.join(' ')}`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: `✅ Updated auto-reactions for ${channel} with emojis: ${emojis.join(' ')}`, ephemeral: true });
       break;
     }
@@ -719,6 +795,11 @@ async function handleWelcomeConfig(interaction: ChatInputCommandInteraction, sub
         c.welcome.enabled = enabled;
       });
 
+      await logConfigChange(
+        interaction,
+        `Welcome messages configured: channel ${channel}, enabled ${enabled}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({
         content: `✅ Welcome messages configured!\n` +
           `Channel: ${channel}\n` +
@@ -756,6 +837,11 @@ async function handleWelcomeConfig(interaction: ChatInputCommandInteraction, sub
         updateConfig((c) => {
           c.welcome.backgroundImage = 'assets/bg.jpg';
         });
+        await logConfigChange(
+          interaction,
+          'Welcome background image updated.',
+          interaction.client as { channels: { cache: Map<string, any> } },
+        ).catch((err) => console.error('[Logging] config change error:', err));
         await interaction.reply({ content: `✅ Welcome background image updated! Saved to \`assets/bg.jpg\``, ephemeral: true });
       } catch (error) {
         console.error('[Welcome] Failed to download background image:', error);
@@ -811,6 +897,11 @@ async function handleWelcomeConfig(interaction: ChatInputCommandInteraction, sub
       updateConfig((c) => {
         c.welcome.enabled = false;
       });
+      await logConfigChange(
+        interaction,
+        'Welcome messages disabled.',
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: '✅ Welcome messages disabled.', ephemeral: true });
       break;
     }
@@ -832,6 +923,11 @@ async function handleGoodbyeConfig(interaction: ChatInputCommandInteraction, sub
         c.goodbye.enabled = enabled;
       });
 
+      await logConfigChange(
+        interaction,
+        `Goodbye messages configured: channel ${channel}, enabled ${enabled}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({
         content: `✅ Goodbye messages configured!\n` +
           `Channel: ${channel}\n` +
@@ -873,6 +969,11 @@ async function handleGoodbyeConfig(interaction: ChatInputCommandInteraction, sub
       updateConfig((c) => {
         c.goodbye.enabled = false;
       });
+      await logConfigChange(
+        interaction,
+        'Goodbye messages disabled.',
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: '✅ Goodbye messages disabled.', ephemeral: true });
       break;
     }

@@ -163,6 +163,31 @@ export interface TicketConfig {
   logChannelId: string;
 }
 
+export interface LoggingCategoryConfig {
+  roles: boolean;
+  members: boolean;
+  channels: boolean;
+  messages: boolean;
+  voice: boolean;
+  threads: boolean;
+  stage: boolean;
+  emojis: boolean;
+  webhooks: boolean;
+  moderation: boolean;
+  guild: boolean;
+  commands: boolean;
+  config: boolean;
+}
+
+export interface LoggingConfig {
+  /** Whether server event logging is enabled at all */
+  enabled: boolean;
+  /** Log channel id. Falls back to channels.logs when empty. */
+  channelId: string;
+  /** Per-category toggles so the log channel isn't spammed */
+  categories: LoggingCategoryConfig;
+}
+
 export interface BotConfig {
   token: string;
   clientId: string;
@@ -201,6 +226,8 @@ export interface BotConfig {
     /** Template for level-up announcements. Placeholders: {user} {username} {level} {server} {role} */
     levelUpMessage: string;
   };
+  /** Server event logging configuration */
+  logging: LoggingConfig;
   verification: {
     /** Message containing the verify button */
     messageId: string;
@@ -247,6 +274,25 @@ const DEFAULT_CONFIG: BotConfig = {
     levelUp: '',
     logs: '',
     levelUpMessage: '🎉 Congratulations {user}, you have reached **level {level}**!',
+  },
+  logging: {
+    enabled: true,
+    channelId: '',
+    categories: {
+      roles: true,
+      members: true,
+      channels: true,
+      messages: true,
+      voice: true,
+      threads: true,
+      stage: true,
+      emojis: true,
+      webhooks: true,
+      moderation: true,
+      guild: true,
+      commands: true,
+      config: true,
+    },
   },
   verification: {
     messageId: '',
@@ -396,6 +442,14 @@ export function loadConfig(): BotConfig {
           ignoreBots: parsed.xp?.ignoreBots ?? DEFAULT_CONFIG.xp.ignoreBots,
         },
         channels: { ...DEFAULT_CONFIG.channels, ...(parsed.channels || {}) },
+        logging: {
+          ...DEFAULT_CONFIG.logging,
+          ...(parsed.logging || {}),
+          categories: {
+            ...DEFAULT_CONFIG.logging.categories,
+            ...(parsed.logging?.categories || {}),
+          },
+        },
         verification: { ...DEFAULT_CONFIG.verification, ...(parsed.verification || {}) },
         automod: {
           ...DEFAULT_CONFIG.automod,

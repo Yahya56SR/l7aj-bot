@@ -20,6 +20,7 @@ import { handleVoiceStateUpdate, handleVoiceTick } from './events/voiceStateUpda
 import { handleReactionAdd, handleReactionRemove } from './events/messageReaction';
 import { handleGuildMemberAdd, handleGuildMemberRemove } from './events/guildMember';
 import { registerLoggingEvents } from './events/logging';
+import { logCommandUsage } from './utils/logger';
 
 dotenv.config();
 loadConfig();
@@ -200,6 +201,12 @@ client.on('interactionCreate', async (interaction) => {
 
   const cmd = client.commands.get(interaction.commandName);
   if (!cmd) return;
+
+  // Log slash command usage to the server logs channel
+  logCommandUsage(interaction, client as { channels: { cache: Map<string, any> } }).catch((err) =>
+    console.error('[Logging] command usage error:', err),
+  );
+
   try {
     await (cmd as any).execute(interaction);
   } catch (err) {

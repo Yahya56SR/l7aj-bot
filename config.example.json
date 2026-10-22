@@ -39,6 +39,26 @@
     "levelUpMessage": "🎉 Congratulations {user}, you have reached **level {level}**!"
   },
 
+  "logging": {
+    "enabled": true,
+    "channelId": "",
+    "categories": {
+      "roles": true,
+      "members": true,
+      "channels": true,
+      "messages": true,
+      "voice": true,
+      "threads": true,
+      "stage": true,
+      "emojis": true,
+      "webhooks": true,
+      "moderation": true,
+      "guild": true,
+      "commands": true,
+      "config": true
+    }
+  },
+
   "verification": {
     "messageId": "",
     "channelId": "",

@@ -3,11 +3,13 @@
  *
  * Wires Discord guild events to the centralized logger in
  * `src/utils/logger.ts`. Every change (roles, nicknames, members, channels,
- * messages) is sent as an embed to the configured logs channel
- * (`config.channels.logs`).
+ * threads, stage instances, emojis, webhooks, messages, voice, moderation,
+ * guild settings) is sent as an embed to the configured logs channel
+ * (`config.channels.logs`, overridable via `config.logging.channelId`).
  *
- * Fails open: if logging fails for any reason, it never blocks core bot
- * functionality.
+ * Per-category toggles under `config.logging.categories` let admins reduce
+ * noise. Logging always fails open: if logging fails for any reason, it
+ * never blocks core bot functionality.
  */
 
 import {
@@ -23,6 +25,13 @@ import {
   OmitPartialGroupDMChannel,
   DMChannel,
   PartialMessage,
+  VoiceState,
+  AnyThreadChannel,
+  ThreadMember,
+  PartialThreadMember,
+  StageInstance,
+  GuildEmoji,
+  Guild,
 } from 'discord.js';
 import {
   logRoleCreate,
@@ -32,13 +41,29 @@ import {
   logNicknameChange,
   logMemberJoin,
   logMemberLeave,
+  logMemberBoost,
+  logMemberTimeout,
   logMemberBan,
   logMemberUnban,
   logChannelCreate,
   logChannelDelete,
   logChannelUpdate,
+  logThreadCreate,
+  logThreadDelete,
+  logThreadUpdate,
+  logThreadMembersUpdate,
+  logStageInstanceCreate,
+  logStageInstanceUpdate,
+  logStageInstanceDelete,
+  logEmojiCreate,
+  logEmojiUpdate,
+  logEmojiDelete,
+  logWebhookUpdate,
   logMessageEdit,
   logMessageDelete,
+  logMessageBulkDelete,
+  logVoiceStateUpdate,
+  logGuildUpdate,
 } from '../utils/logger';
 
 /** Thin client shape the logger expects. */
@@ -76,7 +101,7 @@ export function registerLoggingEvents(client: Client): void {
   });
 
   /* ---------------------------------------------------------------- */
-  /* Member role + nickname updates                                   */
+  /* Member role + nickname + timeout + boost updates                 */
   /* ---------------------------------------------------------------- */
 
   client.on(
@@ -126,6 +151,30 @@ export function registerLoggingEvents(client: Client): void {
           newMember.nickname,
           client as unknown as LoggableClient,
         ).catch((err) => console.error('[Logging] guildMemberUpdate nickname error:', err));
+      }
+
+      // Timeout (communicationDisabledUntilTimestamp) changes
+      const oldTimeout = oldFull.communicationDisabledUntilTimestamp ?? null;
+      const newTimeout = newMember.communicationDisabledUntilTimestamp ?? null;
+      if (oldTimeout !== newTimeout) {
+        logMemberTimeout(
+          newMember,
+          oldTimeout,
+          newTimeout,
+          client as unknown as LoggableClient,
+        ).catch((err) => console.error('[Logging] guildMemberUpdate timeout error:', err));
+      }
+
+      // Boost (premiumSince) changes
+      const oldBoosted = !!oldFull.premiumSince;
+      const newBoosted = !!newMember.premiumSince;
+      if (oldBoosted !== newBoosted) {
+        logMemberBoost(
+          newMember,
+          oldBoosted,
+          newBoosted,
+          client as unknown as LoggableClient,
+        ).catch((err) => console.error('[Logging] guildMemberUpdate boost error:', err));
       }
     },
   );
@@ -205,6 +254,115 @@ export function registerLoggingEvents(client: Client): void {
   );
 
   /* ---------------------------------------------------------------- */
+  /* Thread events                                                    */
+  /* ---------------------------------------------------------------- */
+
+  client.on('threadCreate', (thread: AnyThreadChannel) => {
+    logThreadCreate(thread, client as unknown as LoggableClient).catch((err) =>
+      console.error('[Logging] threadCreate error:', err),
+    );
+  });
+
+  client.on('threadDelete', (thread: AnyThreadChannel) => {
+    logThreadDelete(thread, client as unknown as LoggableClient).catch((err) =>
+      console.error('[Logging] threadDelete error:', err),
+    );
+  });
+
+  client.on(
+    'threadUpdate',
+    (oldThread: AnyThreadChannel, newThread: AnyThreadChannel) => {
+      logThreadUpdate(
+        oldThread,
+        newThread,
+        client as unknown as LoggableClient,
+      ).catch((err) => console.error('[Logging] threadUpdate error:', err));
+    },
+  );
+
+  client.on(
+    'threadMembersUpdate',
+    (
+      addedMembers: ReadonlyMap<string, ThreadMember>,
+      removedMembers: ReadonlyMap<string, ThreadMember | PartialThreadMember>,
+      thread: AnyThreadChannel,
+    ) => {
+      logThreadMembersUpdate(
+        addedMembers,
+        removedMembers,
+        thread,
+        client as unknown as LoggableClient,
+      ).catch((err) => console.error('[Logging] threadMembersUpdate error:', err));
+    },
+  );
+
+  /* ---------------------------------------------------------------- */
+  /* Stage instance events                                            */
+  /* ---------------------------------------------------------------- */
+
+  client.on('stageInstanceCreate', (stageInstance: StageInstance) => {
+    logStageInstanceCreate(
+      stageInstance,
+      client as unknown as LoggableClient,
+    ).catch((err) => console.error('[Logging] stageInstanceCreate error:', err));
+  });
+
+  client.on(
+    'stageInstanceUpdate',
+    (oldStageInstance: StageInstance | null, newStageInstance: StageInstance) => {
+      logStageInstanceUpdate(
+        oldStageInstance,
+        newStageInstance,
+        client as unknown as LoggableClient,
+      ).catch((err) => console.error('[Logging] stageInstanceUpdate error:', err));
+    },
+  );
+
+  client.on('stageInstanceDelete', (stageInstance: StageInstance) => {
+    logStageInstanceDelete(
+      stageInstance,
+      client as unknown as LoggableClient,
+    ).catch((err) => console.error('[Logging] stageInstanceDelete error:', err));
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Emoji events                                                     */
+  /* ---------------------------------------------------------------- */
+
+  client.on('emojiCreate', (emoji: GuildEmoji) => {
+    logEmojiCreate(emoji, client as unknown as LoggableClient).catch((err) =>
+      console.error('[Logging] emojiCreate error:', err),
+    );
+  });
+
+  client.on(
+    'emojiUpdate',
+    (oldEmoji: GuildEmoji, newEmoji: GuildEmoji) => {
+      logEmojiUpdate(
+        oldEmoji,
+        newEmoji,
+        client as unknown as LoggableClient,
+      ).catch((err) => console.error('[Logging] emojiUpdate error:', err));
+    },
+  );
+
+  client.on('emojiDelete', (emoji: GuildEmoji) => {
+    logEmojiDelete(emoji, client as unknown as LoggableClient).catch((err) =>
+      console.error('[Logging] emojiDelete error:', err),
+    );
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Webhook events                                                   */
+  /* ---------------------------------------------------------------- */
+
+  client.on('webhooksUpdate', (channel) => {
+    logWebhookUpdate(channel as TextChannel, client as unknown as LoggableClient).catch((err) =>
+      console.error('[Logging] webhooksUpdate error:', err),
+    );
+  });
+
+  /* ---------------------------------------------------------------- */
   /* Message events                                                   */
   /* ---------------------------------------------------------------- */
 
@@ -232,4 +390,40 @@ export function registerLoggingEvents(client: Client): void {
       );
     },
   );
+
+  client.on(
+    'messageDeleteBulk',
+    (messages, channel) => {
+      if (!channel.guild) return;
+      logMessageBulkDelete(
+        messages as ReadonlyMap<string, any>,
+        channel as TextChannel,
+        client as unknown as LoggableClient,
+      ).catch((err) => console.error('[Logging] messageDeleteBulk error:', err));
+    },
+  );
+
+  /* ---------------------------------------------------------------- */
+  /* Voice events                                                     */
+  /* ---------------------------------------------------------------- */
+
+  client.on('voiceStateUpdate', (oldState: VoiceState, newState: VoiceState) => {
+    logVoiceStateUpdate(
+      oldState,
+      newState,
+      client as unknown as LoggableClient,
+    ).catch((err) => console.error('[Logging] voiceStateUpdate error:', err));
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Guild events                                                     */
+  /* ---------------------------------------------------------------- */
+
+  client.on('guildUpdate', (oldGuild: Guild, newGuild: Guild) => {
+    logGuildUpdate(
+      oldGuild,
+      newGuild,
+      client as unknown as LoggableClient,
+    ).catch((err) => console.error('[Logging] guildUpdate error:', err));
+  });
 }
