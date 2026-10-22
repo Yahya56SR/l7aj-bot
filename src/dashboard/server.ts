@@ -8,6 +8,7 @@
  */
 import http, { IncomingMessage, ServerResponse } from 'http';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import {
@@ -136,8 +137,11 @@ export function startDashboard(client: Client): http.Server | null {
   });
 
   server.listen(port, host, () => {
-    const url = `http://${host === '0.0.0.0' ? '127.0.0.1' : host}:${port}`;
-    console.log(`[Dashboard] Listening on ${url}${password ? ' (password required)' : ''}`);
+    const urls = listenUrls(host, port);
+    console.log(`[Dashboard] Listening on ${urls.join(' · ')}${password ? ' (password required)' : ''}`);
+    if (host === '0.0.0.0' || host === '::' || host === '[::]') {
+      console.log(`[Dashboard] Bound to all interfaces (${host}). Use one of the addresses above or a reverse proxy.`);
+    }
     if (!password) {
       console.warn('[Dashboard] No DASHBOARD_PASSWORD set — access is limited to this machine.');
       console.warn('[Dashboard] Set DASHBOARD_PASSWORD in .env to require a login.');
@@ -150,6 +154,26 @@ export function startDashboard(client: Client): http.Server | null {
 /* ------------------------------------------------------------------ */
 /* Routing                                                             */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Addresses a human can actually open. When bound to `0.0.0.0`/`::`, list the
+ * loopback URL plus every non-internal IPv4 address of this machine.
+ */
+function listenUrls(host: string, port: number): string[] {
+  if (host === '0.0.0.0' || host === '::' || host === '[::]') {
+    const urls = [`http://127.0.0.1:${port} (local)`];
+    for (const addresses of Object.values(os.networkInterfaces())) {
+      for (const address of addresses ?? []) {
+        if (address.family === 'IPv4' && !address.internal) {
+          urls.push(`http://${address.address}:${port} (LAN)`);
+        }
+      }
+    }
+    return urls;
+  }
+  if (host === '::1' || host === '[::1]') return [`http://[::1]:${port}`];
+  return [`http://${host}:${port}`];
+}
 
 async function handleRequest(
   req: IncomingMessage,

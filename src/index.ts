@@ -55,7 +55,7 @@ registerLoggingEvents(client);
 let voiceTickInterval: ReturnType<typeof setInterval> | null = null;
 let ticketSweepInterval: ReturnType<typeof setInterval> | null = null;
 
-client.on('ready', () => {
+client.on('clientReady', () => {
   console.log(`Logged in as ${client.user?.tag} (${client.user?.id})`);
   // Initialize total member count from current guild member count
   const cfg = getConfig();
