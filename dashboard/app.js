@@ -1550,15 +1550,23 @@ function renderStats() {
 
   const leaderboard = stats.xp.leaderboard.length
     ? stats.xp.leaderboard
-        .map(
-          (row, index) => `<tr>
+        .map((row, index) => {
+          const name = row.displayName || row.username;
+          const secondary = row.username && row.username !== name ? `@${row.username}` : row.user_id;
+          const avatar = row.avatarUrl
+            ? `<img class="avatar" src="${esc(row.avatarUrl)}" alt="" width="32" height="32" loading="lazy">`
+            : `<span class="avatar avatar-fallback" aria-hidden="true">${esc((name || '?').slice(0, 1).toUpperCase())}</span>`;
+          return `<tr>
             <td>${index + 1}</td>
-            <td>${esc(row.username || row.user_id)}<br><span class="tiny muted">${esc(row.user_id)}</span></td>
+            <td><div class="member">${avatar}<div class="member-text">
+              <span class="member-name">${esc(name || 'Unknown user')}</span>
+              <span class="tiny muted">${esc(secondary)}</span>
+            </div></div></td>
             <td>${esc(row.level)}</td>
             <td>${esc(row.xp)}</td>
             <td>${esc(row.voice_minutes)} min</td>
-          </tr>`,
-        )
+          </tr>`;
+        })
         .join('')
     : emptyRow(5, 'No XP recorded yet.');
 

@@ -22,6 +22,7 @@ import {
   type Guild,
   type GuildBasedChannel,
   type TextChannel,
+  type User,
 } from 'discord.js';
 import {
   getConfig,
@@ -271,7 +272,7 @@ async function handleRequest(
     }
 
     case 'GET /api/stats': {
-      sendJson(res, 200, statsSnapshot(deps.client, guild));
+      sendJson(res, 200, await statsSnapshot(deps.client, guild));
       return;
     }
 
@@ -506,33 +507,87 @@ function guildSnapshot(guild: Guild | null) {
   };
 }
 
-function statsSnapshot(client: Client, guild: Guild | null) {
-  const nameOf = (userId: string): string | null => {
-    const member = guild?.members.cache.get(userId);
-    return member?.user.username ?? client.users.cache.get(userId)?.username ?? null;
+interface ResolvedUser {
+  username: string;
+  displayName: string;
+  avatarUrl: string;
+}
+
+/**
+ * The JSON DB only stores user IDs, and Discord's cache starts empty after a
+ * restart, so resolve names on demand (same fallback as `/leaderboard`).
+ */
+async function resolveUsers(
+  client: Client,
+  guild: Guild | null,
+  userIds: string[],
+): Promise<Map<string, ResolvedUser>> {
+  const resolved = new Map<string, ResolvedUser>();
+  const missing: string[] = [];
+
+  const remember = (id: string, user: User): void => {
+    const member = guild?.members.cache.get(id);
+    resolved.set(id, {
+      username: user.username,
+      displayName: member?.displayName ?? user.globalName ?? user.username,
+      avatarUrl: user.displayAvatarURL({ extension: 'png', size: 64 }),
+    });
   };
 
+  for (const id of userIds) {
+    const cached = guild?.members.cache.get(id)?.user ?? client.users.cache.get(id);
+    if (cached) remember(id, cached);
+    else missing.push(id);
+  }
+
+  if (missing.length > 0 && client.isReady()) {
+    const fetched = await Promise.allSettled(missing.map((id) => client.users.fetch(id)));
+    fetched.forEach((result, index) => {
+      if (result.status === 'fulfilled') remember(missing[index], result.value);
+    });
+  }
+
+  return resolved;
+}
+
+async function statsSnapshot(client: Client, guild: Guild | null) {
+  const leaderboardRows = getLeaderboard(10);
   const tickets = getAllTickets();
+  const recentTickets = tickets.slice(0, 15);
+
+  const userIds = [
+    ...new Set([
+      ...leaderboardRows.map((row) => row.user_id),
+      ...recentTickets.map((ticket) => ticket.creatorId),
+    ]),
+  ];
+  const users = await resolveUsers(client, guild, userIds);
+
   const openTickets = getOpenTickets();
 
   return {
     xp: {
       ranked: countRanked(),
       totalMembers: getTotalMemberCount(),
-      leaderboard: getLeaderboard(10).map((row) => ({
-        ...row,
-        username: nameOf(row.user_id),
-      })),
+      leaderboard: leaderboardRows.map((row) => {
+        const user = users.get(row.user_id);
+        return {
+          ...row,
+          username: user?.username ?? null,
+          displayName: user?.displayName ?? null,
+          avatarUrl: user?.avatarUrl ?? null,
+        };
+      }),
     },
     tickets: {
       total: getTicketCount(),
       open: openTickets.length,
-      recent: tickets.slice(0, 15).map((ticket) => ({
+      recent: recentTickets.map((ticket) => ({
         id: ticket.id,
         panelId: ticket.panelId,
         status: ticket.status,
         creatorId: ticket.creatorId,
-        creatorName: nameOf(ticket.creatorId),
+        creatorName: users.get(ticket.creatorId)?.displayName ?? null,
         channelId: ticket.channelId,
         createdAt: ticket.createdAt,
         closedAt: ticket.closedAt ?? null,
