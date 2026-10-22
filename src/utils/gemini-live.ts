@@ -111,9 +111,6 @@ export class GeminiLiveModerator {
         config: {
           systemInstruction: { parts: [{ text: this.systemPrompt }] },
           temperature: 0,
-          generationConfig: {
-            responseMimeType: 'application/json',
-          },
           responseModalities: [Modality.TEXT],
         },
         callbacks: {
