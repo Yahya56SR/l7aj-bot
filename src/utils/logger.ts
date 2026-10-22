@@ -693,7 +693,8 @@ export async function logMessageEdit(
   newMessage: Message,
   client: LoggableClient,
 ): Promise<void> {
-  if (oldMessage.author.bot) return;
+  if (!oldMessage.author || oldMessage.author.bot) return;
+  if (!newMessage.author || newMessage.author.bot) return;
   if (oldMessage.content === newMessage.content) return;
   if (!newMessage.guild) return;
 

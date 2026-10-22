@@ -12,7 +12,7 @@
  * correlate responses correctly.
  */
 
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Modality } from '@google/genai';
 
 export interface AiVerdict {
   flagged: boolean;
@@ -111,6 +111,7 @@ export class GeminiLiveModerator {
         config: {
           systemInstruction: { parts: [{ text: this.systemPrompt }] },
           temperature: 0,
+          responseModalities: [Modality.TEXT],
         },
         callbacks: {
           onopen: () => {

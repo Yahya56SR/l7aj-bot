@@ -315,7 +315,7 @@ const DEFAULT_CONFIG: BotConfig = {
     modLogsChannelId: '',
     aiModeration: {
       enabled: false,
-      model: 'gemini-2.5-flash-live',
+      model: 'gemini-3.8-live-extended-thinking',
       apiKey: '',
       systemPrompt:
         'You are a Discord content moderator for a Moroccan community. You read messages in Arabic script, ' +
