@@ -83,6 +83,8 @@ export function handleL7ajMessage(message: Message): void {
 
   if (!message.content.trim() && message.attachments.size === 0) return;
 
+  logMemberMessage(message);
+
   // Enabling L7aj while the bot is already running skips the startup prime, so
   // the first message a channel sees pulls recent context in the background.
   // The batch window usually gives it time to land.
@@ -435,6 +437,14 @@ function describeMessage(message: Message): string {
   if (!content && !attachments) return '';
   const trimmed = content.length > MAX_MESSAGE_CHARS ? `${content.slice(0, MAX_MESSAGE_CHARS)}…` : content;
   return `${trimmed}${attachments}`.trim();
+}
+
+/** Console trace of every member message the persona is listening to. */
+function logMemberMessage(message: Message): void {
+  const author = message.member?.displayName ?? message.author.username;
+  const named = message.channel as Channel & { name?: string };
+  const where = named.name ? `#${named.name}` : message.channelId;
+  console.log(`[L7aj] ${where} | ${author} (${message.author.id}): ${describeMessage(message)}`);
 }
 
 /* ------------------------------------------------------------------ */
