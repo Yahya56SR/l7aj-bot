@@ -37,6 +37,7 @@ writes the same `config.json` that slash commands use.
 | Reaction roles & verification | Channel, message, emoji→role mappings, verified role |
 | Tickets | Panels, button styling, categories, staff/ping roles, form fields, auto-close, transcripts |
 | Auto-reactions | Channel → emoji list |
+| L7aj persona | Channels, model, pacing, tools/memory, full character prompt, **dry-run persona test**, clear memory |
 | Data & stats | XP leaderboard, tracked members, recent/open tickets |
 | Advanced | Write-only bot token / Gemini key fields, raw JSON editor |
 
@@ -81,6 +82,7 @@ you expose the port.
 | Reaction roles | Optional — react to a message to get a role |
 | Verification | Click a button to receive the "verified" role |
 | Rank card fallback | If the canvas fails, a text embed is sent instead |
+| L7aj persona | A second Gemini Live client that reads chosen channels and decides on its own whether to reply — silent by default, with conversation history, durable memory and server tools |
 | Web dashboard | Local UI at `http://127.0.0.1:3000` to edit every setting, post role/ticket panels, and test welcome/AI moderation |
 
 ## Rank card & leaderboard images
@@ -189,6 +191,7 @@ Presence is not used, so the Presence Intent is optional.
 
 **Server permissions for the bot:** Manage Roles, Send Messages, Read Message History, View Channels.
 **Manage Roles** must sit above any role the bot assigns, otherwise role assignment silently fails.
+**Add Reactions** is only needed if L7aj's reaction tool should work.
 
 ## Hosting (bot-hosting.net)
 

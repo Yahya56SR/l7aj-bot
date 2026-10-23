@@ -45,6 +45,8 @@ import {
 import { buildPanelRows } from '../handlers/buttons';
 import { TICKET_OPEN_PREFIX } from '../handlers/tickets';
 import { GeminiLiveModerator } from '../utils/gemini-live';
+import { testL7ajPersona } from '../utils/l7aj';
+import { clearMemories, countMemories } from '../utils/l7aj-memory';
 import { welcomeCard } from '../utils/welcomecard';
 import { refreshLiveLeaderboard } from '../utils/liveLeaderboard';
 
@@ -394,6 +396,28 @@ async function handleRequest(
       return;
     }
 
+    case 'POST /api/ai/persona-test': {
+      const body = await readJson(req);
+      const text = typeof body.text === 'string' ? body.text.trim() : '';
+      if (!text) throw new HttpError(400, 'Provide the message L7aj should react to.');
+
+      try {
+        const result = await testL7ajPersona(deps.client, text);
+        sendJson(res, 200, result);
+      } catch (err) {
+        throw new HttpError(400, err instanceof Error ? err.message : 'The persona test failed.');
+      }
+      return;
+    }
+
+    case 'POST /api/actions/clear-l7aj-memory': {
+      if (!guild) throw new HttpError(400, 'The bot is not connected to a server yet.');
+      const cleared = clearMemories(guild.id);
+      console.log(`[Dashboard] Cleared ${cleared} L7aj memory note(s).`);
+      sendJson(res, 200, { ok: true, cleared, remaining: countMemories(guild.id) });
+      return;
+    }
+
     case 'POST /api/ai/test': {
       const body = await readJson(req);
       const text = typeof body.text === 'string' ? body.text.trim() : '';
@@ -434,6 +458,7 @@ function configMeta(cfg: BotConfig): Record<string, unknown> {
     tokenSource: tokenFromEnv ? 'env' : cfg.token ? 'config' : 'missing',
     geminiKeyConfigured: Boolean(process.env.GEMINI_API_KEY || cfg.automod.aiModeration.apiKey),
     geminiKeySource: keyFromEnv ? 'env' : cfg.automod.aiModeration.apiKey ? 'config' : 'missing',
+    l7ajMemoryNotes: cfg.guildId ? countMemories(cfg.guildId) : 0,
   };
 }
 

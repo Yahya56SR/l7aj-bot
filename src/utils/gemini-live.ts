@@ -764,7 +764,7 @@ function normalizeCategories(categories: string[] | undefined): string[] {
  * `gemini-3.8-live` must omit thinkingConfig entirely; the extended-thinking
  * model requires one.
  */
-function resolveThinkingLevel(model: string, level: string | undefined): string | null {
+export function resolveThinkingLevel(model: string, level: string | undefined): string | null {
   const normalisedModel = model.replace(/^models\//, '');
   const explicit = level?.trim().toLowerCase() || null;
 

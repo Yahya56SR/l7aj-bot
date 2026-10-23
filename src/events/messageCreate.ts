@@ -5,6 +5,7 @@ import { randomXp } from '../utils/level';
 import { handleLevelUp } from '../handlers/levelUp';
 import { runAutomod } from '../utils/automod';
 import { handleAutoReplies } from '../utils/autoReply';
+import { handleL7ajMessage } from '../utils/l7aj';
 
 // Map of userId -> expiry timestamp (Date.now() + cooldownMs)
 const userCooldowns = new Map<string, number>();
@@ -29,6 +30,16 @@ export async function handleMessageCreate(message: Message): Promise<void> {
   if (!message.guild) return;
 
   const cfg = getConfig();
+
+  // The L7aj persona listens to its configured channels and decides on its own
+  // whether to join the conversation. Fire-and-forget: a slow model must never
+  // delay ticket activity, auto-replies, or XP. It also records bot messages
+  // as context, so it is called before the world is filtered for XP.
+  try {
+    handleL7ajMessage(message);
+  } catch (err) {
+    console.error('L7aj handler failed:', err);
+  }
 
   // Keep ticket auto-close timers accurate (every message counts as activity,
   // including staff replies).

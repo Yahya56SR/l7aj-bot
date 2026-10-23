@@ -129,6 +129,28 @@
     ]
   },
 
+  "l7aj": {
+    "enabled": false,
+    "displayName": "L7aj",
+    "model": "gemini-3.8-live",
+    "thinkingLevel": "low",
+    "systemPrompt": "",
+    "channelIds": [],
+    "historySize": 30,
+    "batchWindowMs": 2500,
+    "replyCooldownSeconds": 25,
+    "decisionCooldownSeconds": 10,
+    "maxRepliesPerHour": 40,
+    "maxMessageLength": 500,
+    "showTyping": false,
+    "useReplyReference": false,
+    "toolsEnabled": true,
+    "memoryEnabled": true,
+    "minecraftServerAddress": "",
+    "temperature": 1,
+    "requestTimeoutMs": 20000
+  },
+
   "welcome": {
     "channelId": "WELCOME_CHANNEL_ID_HERE",
     "message": "Welcome {user} to {server}! 🎉",

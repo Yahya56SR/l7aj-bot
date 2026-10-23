@@ -99,6 +99,7 @@ const sections = [
   { id: 'greetings', label: 'Welcome & Goodbye', icon: 'greetings', group: 'Engagement', subtitle: 'Join and leave messages, cards and tests', render: renderGreetings },
   { id: 'autoreact', label: 'Auto-reactions', icon: 'autoreact', group: 'Engagement', subtitle: 'Emojis added automatically per channel', render: renderAutoReact },
   { id: 'autoreply', label: 'Auto-replies', icon: 'autoreply', group: 'Engagement', subtitle: 'Keyword-triggered replies per channel', render: renderAutoReply },
+  { id: 'l7aj', label: 'L7aj Persona', icon: 'bot', group: 'Engagement', subtitle: 'A Gemini-powered character that joins conversations on its own', render: renderL7aj },
   { id: 'roles', label: 'Role Panels', icon: 'roles', group: 'Community', subtitle: 'Button panels, reaction roles and verification', render: renderRoles },
   { id: 'tickets', label: 'Tickets', icon: 'tickets', group: 'Community', subtitle: 'Panels, forms, staff roles and auto-close', render: renderTickets },
   { id: 'automod', label: 'AutoMod & AI', icon: 'shield', group: 'Protection', subtitle: 'Filters, exemptions and Gemini moderation', render: renderAutomod },
@@ -432,6 +433,14 @@ async function onDocumentClick(event) {
         return;
       case 'ai-test':
         await runAiTest();
+        return;
+      case 'l7aj-test':
+        await runL7ajTest();
+        return;
+      case 'clear-l7aj-memory':
+        if (window.confirm('Delete every note L7aj has saved for this server? This cannot be undone.')) {
+          await runAction('/api/actions/clear-l7aj-memory', {}, 'L7aj memory cleared.');
+        }
         return;
       case 'raw-apply':
         applyRawJson();
@@ -807,6 +816,35 @@ async function runAiTest() {
   } catch (err) {
     const resultEl = document.getElementById('ai-result');
     if (resultEl) resultEl.textContent = err.message || 'AI test failed.';
+    throw err;
+  }
+}
+
+async function runL7ajTest() {
+  const input = document.getElementById('l7aj-test-text');
+  const text = input ? input.value.trim() : '';
+  if (!text) {
+    toast('Write the message L7aj should react to first.', 'error');
+    return;
+  }
+
+  const resultEl = document.getElementById('l7aj-result');
+  try {
+    await saveAndRun(async () => {
+      if (resultEl) resultEl.textContent = 'Thinking…';
+      const result = await api('/api/ai/persona-test', { method: 'POST', body: { text } });
+      if (resultEl) {
+        const tools = result.toolCalls && result.toolCalls.length ? result.toolCalls.join(', ') : 'none';
+        resultEl.textContent =
+          `Action: ${result.action === 'reply' ? 'REPLY' : 'SILENT'}\n` +
+          `Model: ${result.model}\n` +
+          `Tools: ${tools}\n\n` +
+          (result.action === 'reply' ? result.message : 'L7aj would stay quiet.') +
+          '\n\nDry run — nothing was posted.';
+      }
+    });
+  } catch (err) {
+    if (resultEl) resultEl.textContent = err.message || 'Persona test failed.';
     throw err;
   }
 }
@@ -1223,6 +1261,7 @@ function renderOverview() {
     toggle('welcome.enabled', cfg.welcome.enabled, 'Welcome messages', 'Greet members when they join'),
     toggle('goodbye.enabled', cfg.goodbye.enabled, 'Goodbye messages', 'Announce members who leave'),
     toggle('autoReplies.enabled', (cfg.autoReplies || {}).enabled, 'Auto-replies', 'Reply to keyword triggers automatically'),
+    toggle('l7aj.enabled', (cfg.l7aj || {}).enabled, 'L7aj persona', 'Let the community character join conversations'),
     toggle('logging.enabled', cfg.logging.enabled, 'Server logging', 'Send server events to the log channel'),
     toggle('automod.blockUrls', cfg.automod.blockUrls, 'Block URLs', 'Delete messages containing links'),
     toggle('automod.blockGifs', cfg.automod.blockGifs, 'Block GIFs', 'Delete GIF uploads and links'),
@@ -1803,6 +1842,97 @@ function autoReplyCard(rule, index) {
       </div>
     </div>
   </div>`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: L7aj persona                                                */
+/* ------------------------------------------------------------------ */
+
+function renderL7aj() {
+  const cfg = state.config.l7aj || {};
+  const notes = state.meta.l7ajMemoryNotes;
+  const keyReady = Boolean(state.meta.geminiKeyConfigured);
+
+  const modelField = `${textInput('l7aj.model', cfg.model, {
+    placeholder: 'gemini-3.8-live',
+    list: 'l7aj-models',
+  })}
+  <datalist id="l7aj-models">
+    <option value="gemini-3.8-live"></option>
+    <option value="gemini-3.8-live-extended-thinking"></option>
+  </datalist>`;
+
+  return `<p class="intro">L7aj is a second Gemini Live client with its own personality. It reads the channels you pick,
+    keeps a short conversation history, and decides on its own whether to reply or stay silent. Silence is the default:
+    it only speaks when a normal member of the community would. Replies never ping anyone.</p>
+
+    ${card('Persona engine', `${toggle('l7aj.enabled', cfg.enabled, 'Enable L7aj', 'While this is off, no channel is streamed to the model.')}
+      ${grid([
+        field('Display name', textInput('l7aj.displayName', cfg.displayName, { placeholder: 'L7aj', maxlength: 32 })),
+        field('Model', modelField, 'gemini-3.8-live is the low-latency model. The extended-thinking variant needs a thinking level.'),
+        field('Thinking level', select('l7aj.thinkingLevel', cfg.thinkingLevel, [
+          { value: 'minimal', label: 'minimal' },
+          { value: 'low', label: 'low' },
+          { value: 'medium', label: 'medium' },
+          { value: 'high', label: 'high' },
+        ]), 'Ignored for gemini-3.8-live.'),
+        field('Temperature', numberInput('l7aj.temperature', cfg.temperature, { min: 0, max: 2, step: 0.1 }), '1 is the default; lower is more predictable.'),
+        field('Response timeout (ms)', numberInput('l7aj.requestTimeoutMs', cfg.requestTimeoutMs, { min: 5000, max: 60000, step: 1000 }), 'A timeout means silence, never a late reply.'),
+      ], 2)}
+      <div class="section-note">${icon('info')}<span>
+        ${keyReady
+          ? 'Uses the same Gemini API key as AI moderation.'
+          : '<strong>No Gemini API key configured.</strong> Add one under Advanced → Secrets before enabling L7aj.'}
+      </span></div>`, { subtitle: 'Model and response budget' })}
+
+    ${card('Where it listens', `<div class="field">
+        <label>Channels</label>
+        ${chipList('l7aj.channelIds', cfg.channelIds || [], 'channel')}
+        <span class="hint">L7aj reads every message in these channels and can answer in them. Empty = it listens nowhere.</span>
+      </div>
+      ${grid([
+        field('History size', numberInput('l7aj.historySize', cfg.historySize, { min: 1, max: 100 }), 'How many earlier messages are sent as context.'),
+        field('Batch window (ms)', numberInput('l7aj.batchWindowMs', cfg.batchWindowMs, { min: 250, max: 30000, step: 250 }), 'Messages arriving in this window become one decision.'),
+      ], 2)}`, { subtitle: 'Channels and conversation context' })}
+
+    ${card('Pacing and style', `${grid([
+        field('Reply cooldown (seconds)', numberInput('l7aj.replyCooldownSeconds', cfg.replyCooldownSeconds, { min: 0, max: 86400 }), 'Minimum gap between two replies. 0 = no cooldown.'),
+        field('Decision cooldown (seconds)', numberInput('l7aj.decisionCooldownSeconds', cfg.decisionCooldownSeconds, { min: 0, max: 3600 }), 'Minimum gap between model evaluations. Higher is cheaper and calmer.'),
+        field('Max replies per hour', numberInput('l7aj.maxRepliesPerHour', cfg.maxRepliesPerHour, { min: 0, max: 1000 }), '0 = unlimited. A safety net, not a target.'),
+        field('Max message length', numberInput('l7aj.maxMessageLength', cfg.maxMessageLength, { min: 1, max: 2000 }), 'Characters. Shorter messages feel more human.'),
+        field('Minecraft server address', textInput('l7aj.minecraftServerAddress', cfg.minecraftServerAddress, { placeholder: 'play.example.com:25565' }), 'Optional. Enables the live status tool.'),
+      ], 2)}
+      <div class="grid cols-2">
+        ${toggle('l7aj.showTyping', cfg.showTyping, 'Show the typing indicator', 'Appears while it decides, including when it ends up staying silent.')}
+        ${toggle('l7aj.useReplyReference', cfg.useReplyReference, 'Reply to the triggering message', 'Off posts a plain message in the channel.')}
+        ${toggle('l7aj.toolsEnabled', cfg.toolsEnabled, 'Enable information tools', 'History, member info, XP, leaderboard, server/voice info, time, reactions.')}
+        ${toggle('l7aj.memoryEnabled', cfg.memoryEnabled, 'Enable memory', 'Let L7aj save and recall durable notes about members.')}
+      </div>`, { subtitle: 'Cooldowns, length and capabilities' })}
+
+    ${card('Character prompt', `${field(
+      'System prompt',
+      textarea('l7aj.systemPrompt', cfg.systemPrompt, { rows: 18 }),
+      'The full L7aj character prompt. Empty uses the built-in L7aj prompt. The runtime contract (decision tools, formatting, privacy) is appended automatically.',
+    )}`, { subtitle: 'Who L7aj is' })}
+
+    ${card('Test the persona', `<div class="section-note">${icon('spark')}<span>
+        <strong>Dry run.</strong> Saves the current settings, sends one message to the model with the last few channel messages as context,
+        and shows the decision. Nothing is posted to Discord.
+      </span></div>
+      <div class="field">
+        <label>Message to react to</label>
+        <textarea class="input" id="l7aj-test-text" rows="3" placeholder="e.g. wa l7aj chno kat dir f had l3am"></textarea>
+      </div>
+      <div class="btn-row"><button class="btn small" data-action="l7aj-test">Ask L7aj</button></div>
+      <div class="preview" id="l7aj-result">Decision will appear here.</div>`,
+      { subtitle: 'See what it would do before enabling it' })}
+
+    ${card('Memory', `<p class="muted">L7aj can save short factual notes about members and the server across restarts.
+        Notes are stored in <code>data/l7aj-memory.json</code> and are never shown in Discord.</p>
+      <div class="row">
+        <span class="pill">${notes == null ? '—' : esc(notes)} saved note${notes === 1 ? '' : 's'}</span>
+        <button class="btn small danger" data-action="clear-l7aj-memory" ${notes ? '' : 'disabled'}>Clear memory</button>
+      </div>`, { subtitle: 'Durable notes' })}`;
 }
 
 /* ------------------------------------------------------------------ */

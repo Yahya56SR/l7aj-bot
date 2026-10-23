@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { L7AJ_DEFAULT_PROMPT } from './prompts/l7aj';
 
 export interface PanelButton {
   roleId: string;
@@ -116,6 +117,51 @@ export interface AutoRepliesConfig {
   enabled: boolean;
   /** Rules are checked in order; the first match replies once */
   rules: AutoReplyRule[];
+}
+
+/**
+ * The L7aj community persona: a second Gemini Live client that reads a few
+ * channels and decides on its own whether to join the conversation.
+ */
+export interface L7ajConfig {
+  /** Master switch. When false nothing is streamed to the model. */
+  enabled: boolean;
+  /** Name the character uses for itself (also shown in logs). */
+  displayName: string;
+  /** Gemini Live model id. */
+  model: string;
+  /** Thinking level; only used by the `-extended-thinking` variant. */
+  thinkingLevel?: string;
+  /** Character prompt. Empty falls back to the built-in L7aj prompt. */
+  systemPrompt: string;
+  /** Channels the persona listens in. Empty means it listens nowhere. */
+  channelIds: string[];
+  /** How many earlier messages are sent as conversation context (1-100). */
+  historySize: number;
+  /** How long messages are collected before one decision (ms). */
+  batchWindowMs: number;
+  /** Minimum seconds between two spoken replies (0 = no cooldown). */
+  replyCooldownSeconds: number;
+  /** Minimum seconds between two model evaluations, replies or not (0 = every batch). */
+  decisionCooldownSeconds: number;
+  /** Maximum replies in any rolling hour (0 = unlimited). */
+  maxRepliesPerHour: number;
+  /** Hard cap for one Discord message (1-2000). */
+  maxMessageLength: number;
+  /** Show the typing indicator while the model is thinking. */
+  showTyping: boolean;
+  /** Reply to the triggering message instead of posting plainly. */
+  useReplyReference: boolean;
+  /** Expose information/action tools (member info, XP, reactions, ...). */
+  toolsEnabled: boolean;
+  /** Let the persona save and recall durable notes about the server. */
+  memoryEnabled: boolean;
+  /** Optional Minecraft server address for the live status tool. */
+  minecraftServerAddress: string;
+  /** Sampling temperature (0-2). */
+  temperature: number;
+  /** Per-event response timeout in milliseconds (5000-60000). */
+  requestTimeoutMs: number;
 }
 
 export interface WelcomeConfig {
@@ -311,6 +357,8 @@ export interface BotConfig {
   autoReactions: AutoReactionChannel[];
   /** Keyword-triggered automatic replies */
   autoReplies: AutoRepliesConfig;
+  /** Social persona driven by a second Gemini Live session */
+  l7aj: L7ajConfig;
   /** Welcome message configuration */
   welcome: WelcomeConfig;
   /** Goodbye message configuration */
@@ -427,6 +475,27 @@ const DEFAULT_CONFIG: BotConfig = {
   autoReplies: {
     enabled: false,
     rules: [],
+  },
+  l7aj: {
+    enabled: false,
+    displayName: 'L7aj',
+    model: 'gemini-3.8-live',
+    thinkingLevel: 'low',
+    systemPrompt: L7AJ_DEFAULT_PROMPT,
+    channelIds: [],
+    historySize: 30,
+    batchWindowMs: 2_500,
+    replyCooldownSeconds: 25,
+    decisionCooldownSeconds: 10,
+    maxRepliesPerHour: 40,
+    maxMessageLength: 500,
+    showTyping: false,
+    useReplyReference: false,
+    toolsEnabled: true,
+    memoryEnabled: true,
+    minecraftServerAddress: '',
+    temperature: 1,
+    requestTimeoutMs: 20_000,
   },
   welcome: {
     channelId: '',
@@ -560,6 +629,12 @@ function normalizeConfig(parsed: any): BotConfig {
         ? source.autoReplies
         : {}),
       rules: Array.isArray(source.autoReplies?.rules) ? source.autoReplies.rules : [],
+    },
+    l7aj: {
+      ...DEFAULT_CONFIG.l7aj,
+      ...(source.l7aj && typeof source.l7aj === 'object' && !Array.isArray(source.l7aj)
+        ? source.l7aj
+        : {}),
     },
     welcome: { ...DEFAULT_CONFIG.welcome, ...(source.welcome || {}) },
     goodbye: { ...DEFAULT_CONFIG.goodbye, ...(source.goodbye || {}) },
@@ -730,6 +805,27 @@ function sanitizeConfig(cfg: BotConfig): void {
         cooldownSeconds: asInt(rule?.cooldownSeconds, 30, 0, 86_400),
       };
     });
+
+  const l7aj = cfg.l7aj;
+  l7aj.enabled = asBool(l7aj.enabled, false);
+  l7aj.displayName = asString(l7aj.displayName, 'L7aj').trim().slice(0, 32) || 'L7aj';
+  l7aj.model = asString(l7aj.model, 'gemini-3.8-live') || 'gemini-3.8-live';
+  l7aj.thinkingLevel = asString(l7aj.thinkingLevel, 'low');
+  l7aj.systemPrompt = asString(l7aj.systemPrompt, L7AJ_DEFAULT_PROMPT);
+  l7aj.channelIds = asStringArray(l7aj.channelIds);
+  l7aj.historySize = asInt(l7aj.historySize, 30, 1, 100);
+  l7aj.batchWindowMs = asInt(l7aj.batchWindowMs, 2_500, 250, 30_000);
+  l7aj.replyCooldownSeconds = asInt(l7aj.replyCooldownSeconds, 25, 0, 86_400);
+  l7aj.decisionCooldownSeconds = asInt(l7aj.decisionCooldownSeconds, 10, 0, 3_600);
+  l7aj.maxRepliesPerHour = asInt(l7aj.maxRepliesPerHour, 40, 0, 1_000);
+  l7aj.maxMessageLength = asInt(l7aj.maxMessageLength, 500, 1, 2_000);
+  l7aj.showTyping = asBool(l7aj.showTyping, false);
+  l7aj.useReplyReference = asBool(l7aj.useReplyReference, false);
+  l7aj.toolsEnabled = asBool(l7aj.toolsEnabled, true);
+  l7aj.memoryEnabled = asBool(l7aj.memoryEnabled, true);
+  l7aj.minecraftServerAddress = asString(l7aj.minecraftServerAddress).trim().slice(0, 200);
+  l7aj.temperature = asNumber(l7aj.temperature, 1, 0, 2);
+  l7aj.requestTimeoutMs = asInt(l7aj.requestTimeoutMs, 20_000, 5_000, 60_000);
 
   cfg.welcome.channelId = asString(cfg.welcome.channelId);
   cfg.welcome.message = asString(cfg.welcome.message);

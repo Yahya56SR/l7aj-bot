@@ -23,6 +23,7 @@ import { registerLoggingEvents } from './events/logging';
 import { logCommandUsage } from './utils/logger';
 import { startDashboard } from './dashboard/server';
 import { startLiveLeaderboard, stopLiveLeaderboard } from './utils/liveLeaderboard';
+import { closeL7aj, primeL7ajHistory } from './utils/l7aj';
 
 dotenv.config();
 loadConfig();
@@ -94,6 +95,9 @@ client.on('clientReady', () => {
   // interval. Reading the interval on every tick means dashboard edits apply
   // without a restart.
   startLiveLeaderboard(client);
+
+  // Give the L7aj persona conversation context immediately after a restart.
+  void primeL7ajHistory(client).catch((err) => console.error('[L7aj] History priming failed:', err));
 });
 
 client.on('messageCreate', async (message) => {
@@ -250,6 +254,7 @@ process.on('SIGINT', async () => {
   if (voiceTickInterval) clearInterval(voiceTickInterval);
   if (ticketSweepInterval) clearInterval(ticketSweepInterval);
   stopLiveLeaderboard();
+  closeL7aj();
   dashboardServer?.close();
   client.destroy();
   process.exit(0);
@@ -260,6 +265,7 @@ process.on('SIGTERM', async () => {
   if (voiceTickInterval) clearInterval(voiceTickInterval);
   if (ticketSweepInterval) clearInterval(ticketSweepInterval);
   stopLiveLeaderboard();
+  closeL7aj();
   dashboardServer?.close();
   client.destroy();
   process.exit(0);
