@@ -1147,7 +1147,12 @@ function getServerEmojis(context: ToolContext): Record<string, unknown> {
     emoji_md: `<${emoji.animated ? 'a' : ''}:${emoji.name}:${emoji.id}>`,
   }));
 
-  return { ok: true, count: emojis.length, emojis };
+  return {
+    ok: true,
+    count: emojis.length,
+    emojis,
+    next: 'Use one of these emoji_md values exactly in send_message, or call stay_silent.',
+  };
 }
 
 function getServerStickers(context: ToolContext): Record<string, unknown> {
@@ -1160,7 +1165,12 @@ function getServerStickers(context: ToolContext): Record<string, unknown> {
     available: sticker.available,
   }));
 
-  return { ok: true, count: stickers.length, stickers };
+  return {
+    ok: true,
+    count: stickers.length,
+    stickers,
+    next: 'Call send_sticker with a fitting sticker id, or call stay_silent if none fits.',
+  };
 }
 
 function getCurrentTime(): Record<string, unknown> {

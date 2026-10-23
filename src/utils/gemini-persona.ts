@@ -178,6 +178,7 @@ interface QueuedItem {
   decision: PersonaDecision | null;
   toolCallNames: string[];
   toolCalls: number;
+  decisionNudges: number;
 }
 
 export class GeminiLivePersona {
@@ -213,6 +214,7 @@ export class GeminiLivePersona {
   private transcriptBuffer = '';
   private turnCompleteSeen = false;
   private toolRoundInFlight = false;
+  private toolExecuting = false;
   private goAway = false;
   private closed = false;
 
@@ -268,6 +270,7 @@ export class GeminiLivePersona {
         decision: null,
         toolCallNames: [],
         toolCalls: 0,
+        decisionNudges: 0,
       };
       item.timer = setTimeout(() => this.onItemDeadline(item, 'queued'), effectiveTimeout);
 
@@ -636,12 +639,30 @@ export class GeminiLivePersona {
     }
 
     if (message.toolCall?.functionCalls?.length) {
+      // A tool call after a tool response starts the follow-up round. Clear the
+      // wait flag first so the new round is processed. If a tool round is still
+      // executing, leave the flag alone and let its guard reject the duplicate.
+      if (this.toolRoundInFlight && !this.toolExecuting) {
+        this.toolRoundInFlight = false;
+      }
       void this.handleToolCalls(item, message.toolCall.functionCalls);
       return;
     }
 
     const serverContent = message.serverContent;
     if (!serverContent) return;
+
+    const hasFollowUpContent =
+      (serverContent.modelTurn?.parts?.length ?? 0) > 0 ||
+      Boolean(serverContent.outputTranscription?.text) ||
+      Boolean(serverContent.interrupted);
+
+    // The turnComplete for the original tool-call turn can arrive after the
+    // tool response. Keep waiting until the follow-up round actually starts.
+    if (this.toolRoundInFlight && hasFollowUpContent) {
+      this.toolRoundInFlight = false;
+      console.debug('[L7aj:Live] Follow-up round started', { toolCalls: item.toolCallNames });
+    }
 
     for (const part of serverContent.modelTurn?.parts ?? []) {
       if (part.text && !(part as { thought?: boolean }).thought) {
@@ -678,6 +699,7 @@ export class GeminiLivePersona {
 
     this.toolRoundInFlight = true;
     this.turnCompleteSeen = false;
+    this.toolExecuting = true;
 
     const generation = this.sessionGeneration;
     const responses: FunctionResponse[] = [];
@@ -701,13 +723,13 @@ export class GeminiLivePersona {
     // The socket died, timed out, or a decision already finished the turn.
     if (generation !== this.sessionGeneration || this.inFlight !== item || item.settled) {
       this.toolRoundInFlight = false;
+      this.toolExecuting = false;
       return;
     }
 
-    this.toolRoundInFlight = false;
-
     if (item.toolCalls > MAX_TOOL_CALLS_PER_TURN && !item.decision) {
       console.warn('[L7aj:Live] Tool-call limit reached without a decision');
+      this.toolExecuting = false;
       this.finishTurn(item, 'tool limit', true);
       return;
     }
@@ -717,19 +739,26 @@ export class GeminiLivePersona {
     // tool responses first — a socket error there would otherwise discard a
     // perfectly good reply.
     if (item.decision) {
+      this.toolExecuting = false;
       this.finishTurn(item, 'decision', true);
       return;
     }
 
     try {
       this.session?.sendToolResponse({ functionResponses: responses });
+      console.debug('[L7aj:Live] Tool responses sent', { toolCalls: item.toolCallNames });
     } catch (err) {
       console.warn('[L7aj:Live] Failed to send tool responses:', describeError(err));
+      this.toolExecuting = false;
       this.failItem(item, 'tool response failed');
       this.teardownSession('tool response failed');
       void this.pump();
       return;
     }
+
+    // Keep `toolRoundInFlight` true until the follow-up content arrives. The
+    // turnComplete for the original tool-call turn may still be in transit.
+    this.toolExecuting = false;
   }
 
   private async runTool(item: QueuedItem, call: FunctionCall): Promise<Record<string, unknown>> {
@@ -822,6 +851,49 @@ export class GeminiLivePersona {
     const decision = item?.decision ?? this.parseDecision(responseText);
     const toolCalls = item?.toolCallNames ?? [];
 
+    // Some models answer an information-tool result with prose instead of a
+    // decision tool. Nudge once, on the same session, before failing silent.
+    if (
+      item &&
+      !decision &&
+      !item.settled &&
+      !forceReset &&
+      item.toolCallNames.length > 0 &&
+      item.decisionNudges < 1 &&
+      (reason === 'turnComplete' || reason === 'idle') &&
+      this.session
+    ) {
+      this.resetTurnBuffers();
+      item.decisionNudges += 1;
+
+      try {
+        this.session.sendClientContent({
+          turns: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text:
+                    'You have the tool result. Do not describe it. Call exactly one decision tool now: ' +
+                    'send_message, send_sticker, or stay_silent.',
+                },
+              ],
+            },
+          ],
+          turnComplete: true,
+        });
+        console.debug('[L7aj:Live] Nudging model for a decision after tool result', { toolCalls });
+
+        if (item.timer) clearTimeout(item.timer);
+        item.deadline = Date.now() + item.timeoutMs;
+        item.timer = setTimeout(() => this.onItemDeadline(item, 'in flight'), item.timeoutMs);
+        return;
+      } catch (err) {
+        console.warn('[L7aj:Live] Failed to nudge model:', describeError(err));
+        // Fall through to the normal fail-silent finish.
+      }
+    }
+
     this.resetTurnBuffers();
 
     if (!item) {
@@ -869,6 +941,7 @@ export class GeminiLivePersona {
     this.transcriptBuffer = '';
     this.turnCompleteSeen = false;
     this.toolRoundInFlight = false;
+    this.toolExecuting = false;
   }
 
   private describeClose(event: unknown): string {
