@@ -4,9 +4,9 @@ import { leaderboardPodium } from '../src/utils/rankcard';
 
 async function main() {
   const buffer = await leaderboardPodium.generate([
-    { username: 'Amine', avatarUrl: '', level: 14, totalXp: 10751 },
-    { username: 'Abdeldahi ✓', avatarUrl: '', level: 14, totalXp: 10116 },
-    { username: 'iGilver_^', avatarUrl: '', level: 13, totalXp: 9470 },
+    { username: 'Amine', avatarUrl: '', level: 14, totalXp: 10751, percent: 52 },
+    { username: 'Abdeldahi ✓', avatarUrl: '', level: 14, totalXp: 10116, percent: 28 },
+    { username: 'iGilver_^', avatarUrl: '', level: 13, totalXp: 9470, percent: 64 },
   ]);
   const out = path.join(process.cwd(), 'preview-podium.png');
   fs.writeFileSync(out, buffer);

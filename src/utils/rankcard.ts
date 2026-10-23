@@ -355,6 +355,7 @@ export interface PodiumEntry {
   avatarUrl: string;
   level: number;
   totalXp: number;
+  percent: number;
 }
 
 interface PodiumSlot {
@@ -364,7 +365,6 @@ interface PodiumSlot {
   width: number;
   height: number;
   rank: 1 | 2 | 3;
-  avatarY: number;
   avatarRadius: number;
 }
 
@@ -376,11 +376,12 @@ const PODIUM_ACCENTS: Record<number, string> = {
 
 /**
  * Top-3 podium image attached to the live leaderboard message: rank 2 on the
- * left, rank 1 raised in the middle, rank 3 on the right.
+ * left, rank 1 raised in the middle, rank 3 on the right. Each panel shows the
+ * avatar, name, level/XP and a segmented progress bar.
  */
 export class LeaderboardPodiumCanvas {
   width = 1000;
-  height = 320;
+  height = 360;
 
   async generate(entries: PodiumEntry[]): Promise<Buffer> {
     ensureFonts();
@@ -391,9 +392,9 @@ export class LeaderboardPodiumCanvas {
     this.drawBackground(ctx);
 
     const slots: PodiumSlot[] = [
-      { entry: entries[1], x: 60, y: 76, width: 272, height: 228, rank: 2, avatarY: 146, avatarRadius: 44 },
-      { entry: entries[0], x: 352, y: 34, width: 296, height: 270, rank: 1, avatarY: 140, avatarRadius: 56 },
-      { entry: entries[2], x: 668, y: 76, width: 272, height: 228, rank: 3, avatarY: 146, avatarRadius: 44 },
+      { entry: entries[1], x: 56, y: 62, width: 276, height: 272, rank: 2, avatarRadius: 42 },
+      { entry: entries[0], x: 352, y: 18, width: 296, height: 316, rank: 1, avatarRadius: 52 },
+      { entry: entries[2], x: 668, y: 62, width: 276, height: 272, rank: 3, avatarRadius: 42 },
     ];
 
     for (const slot of slots) this.drawPanel(ctx, slot);
@@ -446,40 +447,80 @@ export class LeaderboardPodiumCanvas {
   ): Promise<void> {
     const accent = PODIUM_ACCENTS[slot.rank];
     const centerX = slot.x + slot.width / 2;
-    const { avatarY, avatarRadius } = slot;
+    const hero = slot.rank === 1;
 
-    if (slot.rank === 1) {
-      this.drawCrown(ctx, centerX, avatarY - avatarRadius - 28, 46, accent);
-    }
+    // Crown above the avatar
+    const badgeCy = slot.y + (hero ? 42 : 36);
+    this.drawCrown(ctx, centerX, badgeCy, hero ? 46 : 26, accent);
 
-    // Avatar with a rank-coloured ring
-    await this.drawAvatar(ctx, entry.avatarUrl, centerX, avatarY, avatarRadius, accent);
+    const avatarY = slot.y + (hero ? 110 : 88);
+    const nameY = avatarY + slot.avatarRadius + (hero ? 32 : 30);
+    const xpY = nameY + (hero ? 23 : 21);
+    const barY = xpY + (hero ? 14 : 13);
+    const barHeight = hero ? 10 : 9;
+
+    await this.drawAvatar(ctx, entry.avatarUrl, centerX, avatarY, slot.avatarRadius, accent);
 
     // Name
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    ctx.font = `bold 25px ${FONT_STACK}`;
+    ctx.font = `bold ${hero ? 26 : 24}px ${FONT_STACK}`;
     ctx.fillStyle = '#FFFFFF';
-    const nameY = avatarY + avatarRadius + 32;
     ctx.fillText(
-      ellipsize((t) => ctx.measureText(t).width, entry.username, slot.width - 28),
+      ellipsize((t) => ctx.measureText(t).width, entry.username, slot.width - 36),
       centerX,
       nameY,
     );
 
     // Level and XP
-    ctx.font = `17px ${FONT_STACK}`;
+    ctx.font = `${hero ? 18 : 16}px ${FONT_STACK}`;
     ctx.fillStyle = '#b9bbbe';
     ctx.fillText(
       `Lv ${entry.level} · ${Math.floor(entry.totalXp).toLocaleString('en-US')} XP`,
       centerX,
-      nameY + 26,
+      xpY,
     );
 
+    // Segmented progress bar + percentage on the same row
+    const contentWidth = slot.width - 48;
+    const pctWidth = 46;
+    const barWidth = contentWidth - pctWidth;
+    const barX = slot.x + 24;
+
+    this.drawProgressBar(ctx, barX, barY, barWidth, barHeight, entry.percent);
+
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.font = `15px ${FONT_STACK}`;
+    ctx.fillStyle = '#b9bbbe';
+    ctx.fillText(`${entry.percent}%`, barX + contentWidth, barY + barHeight / 2);
+
     // Rank number at the bottom of the panel
-    ctx.font = `bold 28px ${FONT_STACK}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = `bold ${hero ? 30 : 26}px ${FONT_STACK}`;
     ctx.fillStyle = accent;
-    ctx.fillText(`${slot.rank}`, centerX, slot.y + slot.height - 18);
+    ctx.fillText(`${slot.rank}`, centerX, slot.y + slot.height - 16);
+  }
+
+  private drawProgressBar(
+    ctx: SKRSContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    percent: number,
+  ): void {
+    const segments = 12;
+    const gap = 3;
+    const segmentWidth = (width - gap * (segments - 1)) / segments;
+    const filled = Math.round((Math.max(0, Math.min(100, percent)) / 100) * segments);
+
+    for (let i = 0; i < segments; i++) {
+      this.roundedRect(ctx, x + i * (segmentWidth + gap), y, segmentWidth, height, height / 2);
+      ctx.fillStyle = i < filled ? '#5865f2' : 'rgba(255, 255, 255, 0.14)';
+      ctx.fill();
+    }
   }
 
   private async drawAvatar(
@@ -499,8 +540,20 @@ export class LeaderboardPodiumCanvas {
     try {
       if (!avatarUrl) throw new Error('no avatar');
       const avatar = await loadImage(avatarUrl);
-      const size = Math.max(avatar.width, avatar.height);
-      ctx.drawImage(avatar, x - size / 2, y - size / 2, size, size);
+      // Cover-fit: crop the source square, then scale it to the circle's box so
+      // the picture is never blown up beyond the avatar area.
+      const side = Math.min(avatar.width, avatar.height);
+      ctx.drawImage(
+        avatar,
+        (avatar.width - side) / 2,
+        (avatar.height - side) / 2,
+        side,
+        side,
+        x - radius,
+        y - radius,
+        radius * 2,
+        radius * 2,
+      );
     } catch {
       const fallback = ctx.createLinearGradient(x - radius, y - radius, x + radius, y + radius);
       fallback.addColorStop(0, '#5865f2');
