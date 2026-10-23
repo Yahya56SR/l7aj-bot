@@ -124,6 +124,16 @@ and XP is never awarded in DMs.
 | `/rank [user]` | MEE6-style rank card (image) |
 | `/leaderboard [limit]` | Top members by XP (image) |
 
+### Moderation
+
+| Command | Description |
+| --- | --- |
+| `/clear amount:50` | Bulk-delete the last 50 messages in the channel (max 100, 14-day limit) |
+| `/clear amount:50 user:@someone` | Only delete that member's recent messages |
+
+`/clear` requires **Manage Messages** for both you and the bot. Discord refuses bulk deletes for
+messages older than 14 days, so those are skipped and reported back.
+
 ### Roles — button panels
 
 | Command | Description |

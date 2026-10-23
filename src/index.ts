@@ -15,6 +15,7 @@ import * as xpCmd from './commands/xp';
 import * as verifyCmd from './commands/verify';
 import * as configCmd from './commands/config';
 import * as ticketsCmd from './commands/tickets';
+import * as clearCmd from './commands/clear';
 import { handleMessageCreate } from './events/messageCreate';
 import { handleVoiceStateUpdate, handleVoiceTick, seedVoiceSessions } from './events/voiceStateUpdate';
 import { handleReactionAdd, handleReactionRemove } from './events/messageReaction';
@@ -50,6 +51,7 @@ client.commands.set(xpCmd.data.name, xpCmd);
 client.commands.set(verifyCmd.data.name, verifyCmd);
 client.commands.set(configCmd.data.name, configCmd);
 client.commands.set(ticketsCmd.data.name, ticketsCmd);
+client.commands.set(clearCmd.data.name, clearCmd);
 
 // Register server logging event listeners (roles, members, channels, messages)
 registerLoggingEvents(client);
@@ -287,6 +289,7 @@ const commands = [
   verifyCmd.data,
   configCmd.data,
   ticketsCmd.data,
+  clearCmd.data,
 ];
 
 async function start(): Promise<void> {
