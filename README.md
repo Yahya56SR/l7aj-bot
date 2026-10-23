@@ -82,7 +82,7 @@ you expose the port.
 | Reaction roles | Optional — react to a message to get a role |
 | Verification | Click a button to receive the "verified" role |
 | Rank card fallback | If the canvas fails, a text embed is sent instead |
-| L7aj persona | A second Gemini Live client that reads chosen channels and decides on its own whether to reply — silent by default, with conversation history, durable memory, server emojis/stickers, image/GIF understanding, and model-chosen replies or mentions |
+| L7aj persona | A second Gemini Live client that reads chosen channels and decides on its own whether to reply - silent by default, with conversation history, reply-aware context, durable memory, server emojis/stickers, image/GIF understanding, and model-chosen replies or mentions |
 | Web dashboard | Local UI at `http://127.0.0.1:3000` to edit every setting, post role/ticket panels, and test welcome/AI moderation |
 
 ## Rank card & leaderboard images

@@ -358,6 +358,8 @@ And most of the time, it is absolutely nothing.
 export interface L7ajRuntimeOptions {
   /** Name the character uses for itself in the Discord context. */
   displayName: string;
+  /** The bot's own Discord user id, when known. */
+  botId?: string;
   /** Extra information tools are available for this turn. */
   toolsEnabled: boolean;
   memoryEnabled: boolean;
@@ -408,6 +410,10 @@ export function buildL7ajRuntimePrompt(options: L7ajRuntimeOptions): string {
     ? `You may call these tools before deciding:\n${infoTools.map((line) => `- ${line}`).join('\n')}`
     : 'No information tools are enabled this turn. Decide from the context you were given.';
 
+  const botIdLine = options.botId
+    ? `Your own Discord user ID is ${options.botId}. A direct \`<@${options.botId}>\` mention is addressed to you.`
+    : 'Your own messages appear with the 🤖 marker in the history; a `[reply to your message]` marker means the member is replying to you.';
+
   return `---
 
 # RUNTIME INTEGRATION — DISCORD (highest priority)
@@ -438,9 +444,13 @@ Rules:
 
 Each line in the conversation snapshot is formatted as:
 
-\`[HH:MM] Author Name (USER_ID): message\`
+\`[HH:MM] Author Name (USER_ID): [reply to ...] message\`
 
 The number in parentheses is the author's Discord user ID. Use it for \`<@USER_ID>\` mentions. The \`<channel id="...">\` tag contains the current channel ID. Never invent or guess an ID: if the ID is not shown, use the person's visible name without mention markup, or call \`get_member_info\` first.
+
+${botIdLine}
+
+A \`[reply to ...]\` marker means the message is a native Discord reply to the referenced message. If it says \`[reply to your message]\`, the member is replying directly to something you said. Treat that, or a direct mention of your own ID, as a strong signal that the message is addressed to you, even when there is no mention. Still decide from the content whether a reply is natural: a reply reference is context, not an automatic obligation to speak.
 
 ## Available information tools
 

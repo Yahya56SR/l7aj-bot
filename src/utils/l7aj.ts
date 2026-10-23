@@ -33,6 +33,8 @@ interface HistoryEntry {
   content: string;
   timestamp: number;
   bot: boolean;
+  /** Compact `[reply to ...]` marker when this message is a native reply. */
+  replyTo?: string;
 }
 
 interface PendingBatch {
@@ -199,7 +201,12 @@ export async function testL7ajPersona(client: Client, text: string): Promise<L7a
     },
   });
 
-  const testPersona = buildPersona(cfg, apiKey, buildToolDeclarations(cfg));
+  const testPersona = buildPersona(
+    cfg,
+    apiKey,
+    buildToolDeclarations(cfg),
+    client.user?.id ?? '',
+  );
   const executor = createToolExecutor({
     guild,
     channel,
@@ -291,7 +298,12 @@ async function flushBatch(channelId: string, messages: Message[]): Promise<void>
 
   let decision: PersonaDecision | null;
   try {
-    const client = createPersona(cfg, apiKey, buildToolDeclarations(cfg));
+    const client = createPersona(
+      cfg,
+      apiKey,
+      buildToolDeclarations(cfg),
+      trigger.client.user?.id ?? '',
+    );
     const executor = createToolExecutor({
       guild: trigger.guild,
       channel,
@@ -403,6 +415,9 @@ async function sendDecision(trigger: Message, decision: PersonaDecision, cfg: L7
     content: historyContent || '[sticker]',
     timestamp: sent.createdTimestamp,
     bot: true,
+    replyTo: decision.replyToTrigger
+      ? `[reply to ${sanitizeTag(trigger.member?.displayName ?? trigger.author.username)} (${trigger.author.id})]`
+      : undefined,
   });
 
   console.debug('[L7aj] Reply sent', {
@@ -443,6 +458,7 @@ function addHistory(message: Message): void {
     content,
     timestamp: message.createdTimestamp,
     bot: message.author.bot,
+    replyTo: describeReply(message),
   });
 }
 
@@ -515,6 +531,52 @@ function describeMessage(message: Message): string {
 }
 
 /**
+ * Compact reply-reference context. A reply to one of the persona's own
+ * messages is labelled `your message`, which the runtime prompt treats as a
+ * strong signal that the new message is addressed to L7aj.
+ */
+function describeReply(
+  message: Message,
+  known?: { get(id: string): Message | undefined },
+): string {
+  const referenceId = message.reference?.messageId;
+  if (!referenceId) return '';
+
+  const knownMessage =
+    known?.get(referenceId) ??
+    (message.channel.isTextBased()
+      ? message.channel.messages.cache.get(referenceId) ?? null
+      : null);
+  const historical = history
+    .get(message.channelId)
+    ?.find((entry) => entry.id === referenceId);
+
+  const authorId =
+    knownMessage?.author.id ?? message.mentions.repliedUser?.id ?? historical?.authorId ?? '';
+  const authorName =
+    knownMessage?.author.username ??
+    message.mentions.repliedUser?.username ??
+    historical?.authorName ??
+    '';
+  const member = authorId ? message.guild?.members.cache.get(authorId) : null;
+  const displayName = member?.displayName ?? authorName;
+  const isBotAuthor = Boolean(authorId && authorId === message.client.user?.id);
+
+  const label = isBotAuthor
+    ? 'your message'
+    : authorId
+      ? `${sanitizeTag(displayName || 'someone')} (${authorId})`
+      : 'an earlier message';
+
+  const excerpt = (knownMessage ? describeMessage(knownMessage) : historical?.content ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+
+  return `[reply to ${label}${excerpt ? `: "${excerpt}"` : ''}]`;
+}
+
+/**
  * Discord's `cleanContent` rewrites custom emoji markup (`<:name:id>`) into
  * `:name:`, which loses the id the model needs to reuse it. This keeps the
  * markdown intact while still making mentions readable.
@@ -567,7 +629,14 @@ function buildEventPayload(input: PayloadInput): string {
   const recent = previous
     .slice(-Math.max(cfg.historySize, 1))
     .map((entry) =>
-      formatEntry(entry.authorName, entry.authorId, entry.content, entry.timestamp, entry.bot),
+      formatEntry(
+        entry.authorName,
+        entry.authorId,
+        entry.content,
+        entry.timestamp,
+        entry.bot,
+        entry.replyTo,
+      ),
     );
 
   const incoming = batch.map((message) =>
@@ -577,12 +646,13 @@ function buildEventPayload(input: PayloadInput): string {
       describeMessage(message),
       message.createdTimestamp,
       message.author.bot,
+      describeReply(message),
     ),
   );
 
   if (synthetic) {
     incoming.push(
-      formatEntry(synthetic.authorName, '', synthetic.content, synthetic.timestamp, false),
+      formatEntry(synthetic.authorName, '', synthetic.content, synthetic.timestamp, false, ''),
     );
   }
 
@@ -614,6 +684,7 @@ function formatEntry(
   content: string,
   timestamp: number,
   bot: boolean,
+  replyTo = '',
 ): string {
   const time = moroccoClock(timestamp);
   const safeContent = content.replace(
@@ -621,7 +692,8 @@ function formatEntry(
     ' ',
   );
   const id = authorId ? ` (${authorId})` : '';
-  return `[${time}] ${bot ? '🤖 ' : ''}${author}${id}: ${safeContent || '(empty)'}`;
+  const reply = replyTo ? ` ${replyTo}` : '';
+  return `[${time}] ${bot ? '🤖 ' : ''}${author}${id}:${reply} ${safeContent || '(empty)'}`;
 }
 
 function sanitizeTag(value: string): string {
@@ -650,9 +722,10 @@ function resolveApiKey(): string {
   return process.env.GEMINI_API_KEY || getConfig().automod.aiModeration.apiKey || '';
 }
 
-function buildSystemPrompt(cfg: L7ajConfig): string {
+function buildSystemPrompt(cfg: L7ajConfig, botId: string): string {
   const runtime = buildL7ajRuntimePrompt({
     displayName: cfg.displayName || 'L7aj',
+    botId,
     toolsEnabled: cfg.toolsEnabled,
     memoryEnabled: cfg.memoryEnabled,
     minecraftEnabled: Boolean(cfg.minecraftServerAddress.trim()),
@@ -663,13 +736,19 @@ function buildSystemPrompt(cfg: L7ajConfig): string {
   return `${character}\n\n${runtime}`;
 }
 
-function createPersona(cfg: L7ajConfig, apiKey: string, tools: FunctionDeclaration[]): GeminiLivePersona {
+function createPersona(
+  cfg: L7ajConfig,
+  apiKey: string,
+  tools: FunctionDeclaration[],
+  botId: string,
+): GeminiLivePersona {
   const key = [
     apiKey,
     cfg.model,
     cfg.thinkingLevel,
     cfg.systemPrompt,
     cfg.displayName,
+    botId,
     cfg.toolsEnabled,
     cfg.memoryEnabled,
     cfg.minecraftServerAddress,
@@ -681,16 +760,21 @@ function createPersona(cfg: L7ajConfig, apiKey: string, tools: FunctionDeclarati
   if (persona && personaKey === key) return persona;
 
   persona?.close();
-  persona = buildPersona(cfg, apiKey, tools);
+  persona = buildPersona(cfg, apiKey, tools, botId);
   personaKey = key;
   return persona;
 }
 
-function buildPersona(cfg: L7ajConfig, apiKey: string, tools: FunctionDeclaration[]): GeminiLivePersona {
+function buildPersona(
+  cfg: L7ajConfig,
+  apiKey: string,
+  tools: FunctionDeclaration[],
+  botId: string,
+): GeminiLivePersona {
   return new GeminiLivePersona({
     apiKey,
     model: cfg.model,
-    systemPrompt: buildSystemPrompt(cfg),
+    systemPrompt: buildSystemPrompt(cfg, botId),
     tools,
     thinkingLevel: cfg.thinkingLevel,
     temperature: cfg.temperature,
@@ -1321,6 +1405,7 @@ async function fetchHistory(channel: Channel, cfg: L7ajConfig): Promise<HistoryE
         content: describeMessage(message),
         timestamp: message.createdTimestamp,
         bot: message.author.bot,
+        replyTo: describeReply(message, fetched),
       }))
       .filter((entry) => entry.content !== '');
   } catch {
