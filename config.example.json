@@ -143,7 +143,6 @@
     "maxRepliesPerHour": 40,
     "maxMessageLength": 500,
     "showTyping": false,
-    "useReplyReference": false,
     "toolsEnabled": true,
     "memoryEnabled": true,
     "minecraftServerAddress": "",

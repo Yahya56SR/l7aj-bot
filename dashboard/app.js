@@ -835,11 +835,15 @@ async function runL7ajTest() {
       const result = await api('/api/ai/persona-test', { method: 'POST', body: { text } });
       if (resultEl) {
         const tools = result.toolCalls && result.toolCalls.length ? result.toolCalls.join(', ') : 'none';
+        const sticker = result.stickerId ? ` [sticker ${result.stickerId}]` : '';
+        const mode = result.action === 'reply' ? (result.replyToTrigger ? ' (reply)' : ' (bare message)') : '';
         resultEl.textContent =
           `Action: ${result.action === 'reply' ? 'REPLY' : 'SILENT'}\n` +
           `Model: ${result.model}\n` +
           `Tools: ${tools}\n\n` +
-          (result.action === 'reply' ? result.message : 'L7aj would stay quiet.') +
+          (result.action === 'reply'
+            ? `${result.message || '(sticker only)'}${sticker}${mode}`
+            : 'L7aj would stay quiet.') +
           '\n\nDry run — nothing was posted.';
       }
     });
@@ -1864,7 +1868,8 @@ function renderL7aj() {
 
   return `<p class="intro">L7aj is a second Gemini Live client with its own personality. It reads the channels you pick,
     keeps a short conversation history, and decides on its own whether to reply or stay silent. Silence is the default:
-    it only speaks when a normal member of the community would. Replies never ping anyone.</p>
+    it only speaks when a normal member of the community would. It chooses per message whether to send a native reply
+    or a bare message, can mention members it actually knows, and can use server emojis and stickers.</p>
 
     ${card('Persona engine', `${toggle('l7aj.enabled', cfg.enabled, 'Enable L7aj', 'While this is off, no channel is streamed to the model.')}
       ${grid([
@@ -1904,8 +1909,7 @@ function renderL7aj() {
       ], 2)}
       <div class="grid cols-2">
         ${toggle('l7aj.showTyping', cfg.showTyping, 'Show the typing indicator', 'Appears while it decides, including when it ends up staying silent.')}
-        ${toggle('l7aj.useReplyReference', cfg.useReplyReference, 'Reply to the triggering message', 'Off posts a plain message in the channel.')}
-        ${toggle('l7aj.toolsEnabled', cfg.toolsEnabled, 'Enable information tools', 'History, member info, XP, leaderboard, server/voice info, time, reactions.')}
+        ${toggle('l7aj.toolsEnabled', cfg.toolsEnabled, 'Enable information tools', 'History, member info, XP, leaderboard, server/voice info, time, reactions, emojis and stickers.')}
         ${toggle('l7aj.memoryEnabled', cfg.memoryEnabled, 'Enable memory', 'Let L7aj save and recall durable notes about members.')}
       </div>`, { subtitle: 'Cooldowns, length and capabilities' })}
 

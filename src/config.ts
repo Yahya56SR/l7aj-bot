@@ -150,9 +150,7 @@ export interface L7ajConfig {
   maxMessageLength: number;
   /** Show the typing indicator while the model is thinking. */
   showTyping: boolean;
-  /** Reply to the triggering message instead of posting plainly. */
-  useReplyReference: boolean;
-  /** Expose information/action tools (member info, XP, reactions, ...). */
+  /** Expose information/action tools (member info, XP, emojis, stickers, ...). */
   toolsEnabled: boolean;
   /** Let the persona save and recall durable notes about the server. */
   memoryEnabled: boolean;
@@ -490,7 +488,6 @@ const DEFAULT_CONFIG: BotConfig = {
     maxRepliesPerHour: 40,
     maxMessageLength: 500,
     showTyping: false,
-    useReplyReference: false,
     toolsEnabled: true,
     memoryEnabled: true,
     minecraftServerAddress: '',
@@ -820,12 +817,13 @@ function sanitizeConfig(cfg: BotConfig): void {
   l7aj.maxRepliesPerHour = asInt(l7aj.maxRepliesPerHour, 40, 0, 1_000);
   l7aj.maxMessageLength = asInt(l7aj.maxMessageLength, 500, 1, 2_000);
   l7aj.showTyping = asBool(l7aj.showTyping, false);
-  l7aj.useReplyReference = asBool(l7aj.useReplyReference, false);
   l7aj.toolsEnabled = asBool(l7aj.toolsEnabled, true);
   l7aj.memoryEnabled = asBool(l7aj.memoryEnabled, true);
   l7aj.minecraftServerAddress = asString(l7aj.minecraftServerAddress).trim().slice(0, 200);
   l7aj.temperature = asNumber(l7aj.temperature, 1, 0, 2);
   l7aj.requestTimeoutMs = asInt(l7aj.requestTimeoutMs, 20_000, 5_000, 60_000);
+  // Replies are now chosen per message by the model, so drop the old static toggle.
+  delete (l7aj as { useReplyReference?: boolean }).useReplyReference;
 
   cfg.welcome.channelId = asString(cfg.welcome.channelId);
   cfg.welcome.message = asString(cfg.welcome.message);

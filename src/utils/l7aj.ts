@@ -6,7 +6,7 @@
  * sending the reply. It is intentionally fail-silent: every error path just
  * means L7aj says nothing.
  */
-import type { Channel, Client, Guild, Message } from 'discord.js';
+import type { Channel, Client, Guild, Message, MessageMentionOptions } from 'discord.js';
 import { Type, type FunctionDeclaration } from '@google/genai';
 import { getConfig, type L7ajConfig } from '../config';
 import { countRanked, getLeaderboard, getRankPosition, getUser } from '../db';
@@ -15,10 +15,12 @@ import { buildL7ajRuntimePrompt, L7AJ_DEFAULT_PROMPT } from '../prompts/l7aj';
 import {
   GeminiLivePersona,
   type PersonaDecision,
+  type PersonaMedia,
   type PersonaToolCall,
   type PersonaToolExecutor,
 } from './gemini-persona';
 import { addMemory, countMemories, recallMemories } from './l7aj-memory';
+import { collectMessageMedia } from './l7aj-media';
 
 /* ------------------------------------------------------------------ */
 /* State                                                               */
@@ -156,6 +158,8 @@ export async function primeL7ajHistory(client: Client): Promise<void> {
 export interface L7ajTestResult {
   action: 'reply' | 'silent';
   message: string;
+  stickerId?: string;
+  replyToTrigger?: boolean;
   toolCalls: string[];
   model: string;
 }
@@ -208,6 +212,8 @@ export async function testL7ajPersona(client: Client, text: string): Promise<L7a
     return {
       action: decision?.action ?? 'silent',
       message: decision?.message ?? '',
+      stickerId: decision?.stickerId,
+      replyToTrigger: decision?.replyToTrigger,
       toolCalls: decision?.toolCalls ?? [],
       model: cfg.model,
     };
@@ -267,6 +273,10 @@ async function flushBatch(channelId: string, messages: Message[]): Promise<void>
     batch: messages,
   });
 
+  // Images/GIFs are fetched while the typing indicator is shown, so the model
+  // receives the visual context with the same event as the text snapshot.
+  const mediaPromise = collectMessageMedia(messages).catch(() => [] as PersonaMedia[]);
+
   const channel = trigger.channel;
   const typingChannel = channel as Channel & { sendTyping?: () => Promise<void> };
   if (cfg.showTyping && typeof typingChannel.sendTyping === 'function') {
@@ -277,6 +287,8 @@ async function flushBatch(channelId: string, messages: Message[]): Promise<void>
     }
   }
 
+  const media = await mediaPromise;
+
   let decision: PersonaDecision | null;
   try {
     const client = createPersona(cfg, apiKey, buildToolDeclarations(cfg));
@@ -286,7 +298,7 @@ async function flushBatch(channelId: string, messages: Message[]): Promise<void>
       trigger,
       history: () => history.get(channelId) ?? [],
     });
-    decision = await client.ask(payload, executor, cfg.requestTimeoutMs);
+    decision = await client.ask(payload, executor, cfg.requestTimeoutMs, media);
   } catch (err) {
     console.error('[L7aj] Failed to evaluate batch:', err);
     return;
@@ -299,9 +311,14 @@ async function flushBatch(channelId: string, messages: Message[]): Promise<void>
     action: decision?.action ?? 'none (fail silent)',
     toolCalls: decision?.toolCalls ?? [],
     messageLength: decision?.message.length ?? 0,
+    stickerId: decision?.stickerId ?? null,
+    reply: decision?.replyToTrigger ?? false,
+    media: media.length,
   });
 
-  if (!decision || decision.action !== 'reply' || !decision.message.trim()) return;
+  if (!decision || decision.action !== 'reply' || (!decision.message.trim() && !decision.stickerId)) {
+    return;
+  }
 
   // Another batch may have replied while this one was thinking.
   if (isRateLimited(cfg)) {
@@ -318,25 +335,45 @@ async function flushBatch(channelId: string, messages: Message[]): Promise<void>
     return;
   }
 
-  await sendReply(trigger, decision.message, cfg);
+  await sendDecision(trigger, decision, cfg);
 }
 
-async function sendReply(trigger: Message, rawMessage: string, cfg: L7ajConfig): Promise<void> {
+async function sendDecision(trigger: Message, decision: PersonaDecision, cfg: L7ajConfig): Promise<void> {
   const channel = trigger.channel;
   if (!trigger.guild || !channel.isTextBased() || channel.isDMBased()) return;
 
   const limit = Math.min(Math.max(cfg.maxMessageLength, 1), MAX_REPLY_LENGTH);
-  const content = sanitizeOutgoing(rawMessage).slice(0, limit).trim();
-  if (!content) return;
+  const sanitized = sanitizeOutgoing(decision.message).slice(0, limit).trim();
+  const content = sanitized ? await validateMentions(sanitized, trigger.guild) : '';
+
+  const requestedSticker = decision.stickerId?.trim() ?? '';
+  const sticker =
+    requestedSticker && /^\d{15,25}$/.test(requestedSticker)
+      ? trigger.guild.stickers.cache.get(requestedSticker)
+      : null;
+
+  if (requestedSticker && !sticker) {
+    console.warn('[L7aj] Ignoring unknown sticker id', { stickerId: requestedSticker });
+  }
+
+  if (!content && !sticker) return;
+
+  // Users may be pinged through <@ID> markup, but roles, @everyone and @here
+  // stay silent. A native reply notifies the trigger author when chosen.
+  const allowedMentions: MessageMentionOptions = {
+    parse: ['users'],
+    repliedUser: Boolean(decision.replyToTrigger),
+  };
 
   const payload = {
-    content,
-    allowedMentions: { parse: [] as const, repliedUser: false },
+    content: content || undefined,
+    allowedMentions,
+    ...(sticker ? { stickers: [sticker.id] } : {}),
   };
 
   let sent: Message;
   try {
-    sent = cfg.useReplyReference
+    sent = decision.replyToTrigger
       ? await trigger.reply({ ...payload, failIfNotExists: false })
       : await channel.send(payload);
   } catch (err) {
@@ -349,18 +386,31 @@ async function sendReply(trigger: Message, rawMessage: string, cfg: L7ajConfig):
   replyTimestamps.push(now);
   pruneReplyTimestamps(now);
 
+  const historyContent = [
+    content,
+    sticker ? `[sticker: ${sticker.name} (id: ${sticker.id})]` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+
   // Register the sent message immediately so the next batch sees it even
   // before the gateway echo arrives; the echo then dedupes on the message id.
   addHistoryEntry(trigger.channelId, {
     id: sent.id,
     authorId: sent.author.id,
     authorName: cfg.displayName,
-    content,
+    content: historyContent || '[sticker]',
     timestamp: sent.createdTimestamp,
     bot: true,
   });
 
-  console.debug('[L7aj] Reply sent', { channelId: trigger.channelId, length: content.length });
+  console.debug('[L7aj] Reply sent', {
+    channelId: trigger.channelId,
+    length: content.length,
+    stickerId: sticker?.id ?? null,
+    reply: Boolean(decision.replyToTrigger),
+  });
 }
 
 function isRateLimited(cfg: L7ajConfig): boolean {
@@ -430,13 +480,64 @@ function schedulePrimeHistory(channel: Channel, cfg: L7ajConfig): void {
 }
 
 function describeMessage(message: Message): string {
-  const content = (message.cleanContent || message.content || '').replace(/\s+/g, ' ').trim();
-  const attachments = message.attachments.size
-    ? ` [${message.attachments.size} attachment${message.attachments.size === 1 ? '' : 's'}]`
-    : '';
-  if (!content && !attachments) return '';
+  const content = cleanMessageContent(message).replace(/\s+/g, ' ').trim();
+
+  const attachments = [...message.attachments.values()].slice(0, 3).map((attachment) => {
+    const type = (attachment.contentType ?? '').toLowerCase();
+    const name = attachment.name ?? 'attachment';
+    const kind =
+      type === 'image/gif' || name.toLowerCase().endsWith('.gif')
+        ? 'gif'
+        : type.startsWith('image/')
+          ? 'image'
+          : type.startsWith('video/')
+            ? 'video'
+            : type.startsWith('audio/')
+              ? 'audio'
+              : 'file';
+    return `[${kind}: ${name}]`;
+  });
+
+  if (message.attachments.size > 3) {
+    const extra = message.attachments.size - 3;
+    attachments.push(`[+${extra} more attachment${extra === 1 ? '' : 's'}]`);
+  }
+
+  const stickers = [...message.stickers.values()].map(
+    (sticker) => `[sticker: ${sticker.name} (id: ${sticker.id})]`,
+  );
+
+  const extras = [...attachments, ...stickers].join(' ');
+  if (!content && !extras) return '';
+
   const trimmed = content.length > MAX_MESSAGE_CHARS ? `${content.slice(0, MAX_MESSAGE_CHARS)}…` : content;
-  return `${trimmed}${attachments}`.trim();
+  return `${trimmed}${trimmed && extras ? ' ' : ''}${extras}`.trim();
+}
+
+/**
+ * Discord's `cleanContent` rewrites custom emoji markup (`<:name:id>`) into
+ * `:name:`, which loses the id the model needs to reuse it. This keeps the
+ * markdown intact while still making mentions readable.
+ */
+function cleanMessageContent(message: Message): string {
+  const raw = message.content ?? '';
+  if (!raw) return '';
+
+  return raw
+    .replace(/<@!?(\d+)>/g, (match, id: string) => {
+      const member = message.guild?.members.cache.get(id);
+      if (member) return `@${member.displayName} (<@${id}>)`;
+      const user = message.client.users.cache.get(id);
+      return user ? `@${user.displayName} (<@${id}>)` : match;
+    })
+    .replace(/<@&(\d+)>/g, (match, id: string) => {
+      const role = message.guild?.roles.cache.get(id);
+      return role ? `@${role.name}` : match;
+    })
+    .replace(/<#(\d+)>/g, (match, id: string) => {
+      const channel = message.client.channels.cache.get(id) as { name?: string } | undefined;
+      return channel?.name ? `#${channel.name} (<#${id}>)` : match;
+    });
 }
 
 /** Console trace of every member message the persona is listening to. */
@@ -465,20 +566,24 @@ function buildEventPayload(input: PayloadInput): string {
 
   const recent = previous
     .slice(-Math.max(cfg.historySize, 1))
-    .map((entry) => formatEntry(entry.authorName, entry.content, entry.timestamp, entry.bot));
-
-  const incoming = batch
-    .map((message) =>
-      formatEntry(
-        message.member?.displayName ?? message.author.username,
-        describeMessage(message),
-        message.createdTimestamp,
-        message.author.bot,
-      ),
+    .map((entry) =>
+      formatEntry(entry.authorName, entry.authorId, entry.content, entry.timestamp, entry.bot),
     );
 
+  const incoming = batch.map((message) =>
+    formatEntry(
+      message.member?.displayName ?? message.author.username,
+      message.author.id,
+      describeMessage(message),
+      message.createdTimestamp,
+      message.author.bot,
+    ),
+  );
+
   if (synthetic) {
-    incoming.push(formatEntry(synthetic.authorName, synthetic.content, synthetic.timestamp, false));
+    incoming.push(
+      formatEntry(synthetic.authorName, '', synthetic.content, synthetic.timestamp, false),
+    );
   }
 
   const latest = incoming.length ? incoming[incoming.length - 1] : '(none)';
@@ -487,8 +592,8 @@ function buildEventPayload(input: PayloadInput): string {
 
   return [
     `<current_time>${new Date().toISOString()} (Morocco: ${moroccoTime()})</current_time>`,
-    `<server>${guild.name} — ${guild.memberCount} members</server>`,
-    `<channel>${channelName}</channel>`,
+    `<server>${sanitizeTag(guild.name)} — ${guild.memberCount} members</server>`,
+    `<channel id="${channel.id}">${sanitizeTag(channelName)}</channel>`,
     '<recent_messages>',
     recent.length ? recent.join('\n') : '(no earlier messages)',
     '</recent_messages>',
@@ -503,13 +608,24 @@ function buildEventPayload(input: PayloadInput): string {
   ].join('\n');
 }
 
-function formatEntry(author: string, content: string, timestamp: number, bot: boolean): string {
+function formatEntry(
+  author: string,
+  authorId: string,
+  content: string,
+  timestamp: number,
+  bot: boolean,
+): string {
   const time = moroccoClock(timestamp);
   const safeContent = content.replace(
     /<\/?(?:recent_messages|new_messages|latest_message|current_time|server|channel)>/gi,
     ' ',
   );
-  return `[${time}] ${bot ? '🤖 ' : ''}${author}: ${safeContent || '(empty)'}`;
+  const id = authorId ? ` (${authorId})` : '';
+  return `[${time}] ${bot ? '🤖 ' : ''}${author}${id}: ${safeContent || '(empty)'}`;
+}
+
+function sanitizeTag(value: string): string {
+  return value.replace(/[<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
 /** HH:MM in the persona's timezone, so message times match `get_current_time`. */
@@ -551,6 +667,7 @@ function createPersona(cfg: L7ajConfig, apiKey: string, tools: FunctionDeclarati
   const key = [
     apiKey,
     cfg.model,
+    cfg.thinkingLevel,
     cfg.systemPrompt,
     cfg.displayName,
     cfg.toolsEnabled,
@@ -680,6 +797,25 @@ function buildToolDeclarations(cfg: L7ajConfig): FunctionDeclaration[] {
     );
   }
 
+  // Formatting helpers stay available even when the broader information tools
+  // are off: the model needs real emoji markdown and sticker ids to use them.
+  tools.push(
+    {
+      name: 'get_server_emojis',
+      description:
+        'List every custom emoji in this server with its exact Discord markdown ' +
+        '(`<:name:id>` or `<a:name:id>`). Use it before using a custom emoji you have not seen.',
+      parameters: { type: Type.OBJECT, properties: {} },
+    },
+    {
+      name: 'get_server_stickers',
+      description:
+        'List the stickers available in this server with their real sticker ids. ' +
+        'Use it before calling send_sticker.',
+      parameters: { type: Type.OBJECT, properties: {} },
+    },
+  );
+
   if (cfg.memoryEnabled) {
     tools.push(
       {
@@ -754,6 +890,10 @@ function createToolExecutor(context: ToolContext): PersonaToolExecutor {
         return getVoiceMembers(context);
       case 'get_channel_info':
         return getChannelInfo(context);
+      case 'get_server_emojis':
+        return getServerEmojis(context);
+      case 'get_server_stickers':
+        return getServerStickers(context);
       case 'get_current_time':
         return getCurrentTime();
       case 'react_to_message':
@@ -783,6 +923,7 @@ function getRecentMessages(context: ToolContext, rawLimit: unknown): Record<stri
     .map((entry) => ({
       time: moroccoClock(entry.timestamp),
       author: entry.authorName,
+      authorId: entry.authorId,
       content: entry.content,
       bot: entry.bot,
     }));
@@ -806,6 +947,7 @@ function searchHistory(context: ToolContext, rawQuery: unknown, rawLimit: unknow
     .map((entry) => ({
       time: moroccoClock(entry.timestamp),
       author: entry.authorName,
+      authorId: entry.authorId,
       content: entry.content,
       bot: entry.bot,
     }));
@@ -898,6 +1040,7 @@ async function getUserStats(context: ToolContext, raw: unknown): Promise<Record<
   if (!user) {
     return {
       ok: true,
+      id: resolved.id,
       member: resolved.displayName,
       level: 0,
       xp: 0,
@@ -911,6 +1054,7 @@ async function getUserStats(context: ToolContext, raw: unknown): Promise<Record<
   const info = levelFromXp(user.xp);
   return {
     ok: true,
+    id: resolved.id,
     member: resolved.displayName,
     level: info.level,
     xp: info.totalXp,
@@ -929,6 +1073,7 @@ function getLeaderboardTool(context: ToolContext, rawLimit: unknown): Record<str
     const member = context.guild.members.cache.get(row.user_id);
     return {
       position: index + 1,
+      id: row.user_id,
       name: member?.displayName ?? member?.user.username ?? `user ${row.user_id}`,
       level: row.level,
       xp: row.xp,
@@ -952,7 +1097,11 @@ function getServerInfo(context: ToolContext): Record<string, unknown> {
 }
 
 function getVoiceMembers(context: ToolContext): Record<string, unknown> {
-  const channels: Array<{ channel: string; members: string[]; count: number }> = [];
+  const channels: Array<{
+    channel: string;
+    members: Array<{ name: string; id: string }>;
+    count: number;
+  }> = [];
 
   for (const channel of context.guild.channels.cache.values()) {
     if (!channel.isVoiceBased()) continue;
@@ -960,7 +1109,7 @@ function getVoiceMembers(context: ToolContext): Record<string, unknown> {
     if (humans.length === 0) continue;
     channels.push({
       channel: channel.name,
-      members: humans.slice(0, 10).map((member) => member.displayName),
+      members: humans.slice(0, 10).map((member) => ({ name: member.displayName, id: member.id })),
       count: humans.length,
     });
   }
@@ -988,6 +1137,30 @@ function getChannelInfo(context: ToolContext): Record<string, unknown> {
     type: channel.type ?? null,
     category: channel.parent?.name ?? null,
   };
+}
+
+function getServerEmojis(context: ToolContext): Record<string, unknown> {
+  const emojis = [...context.guild.emojis.cache.values()].map((emoji) => ({
+    name: emoji.name,
+    id: emoji.id,
+    animated: Boolean(emoji.animated),
+    emoji_md: `<${emoji.animated ? 'a' : ''}:${emoji.name}:${emoji.id}>`,
+  }));
+
+  return { ok: true, count: emojis.length, emojis };
+}
+
+function getServerStickers(context: ToolContext): Record<string, unknown> {
+  const stickers = [...context.guild.stickers.cache.values()].map((sticker) => ({
+    id: sticker.id,
+    name: sticker.name,
+    description: sticker.description,
+    tags: sticker.tags,
+    format: sticker.format,
+    available: sticker.available,
+  }));
+
+  return { ok: true, count: stickers.length, stickers };
 }
 
 function getCurrentTime(): Record<string, unknown> {
@@ -1163,6 +1336,25 @@ function sanitizeOutgoing(value: string): string {
     .replace(/@everyone/g, '@\u200Beveryone')
     .replace(/@here/g, '@\u200Bhere')
     .trim();
+}
+
+/**
+ * A hallucinated `<@ID>` could ping a real member. Only mentions that resolve
+ * to an actual guild member are kept; anything else becomes plain text.
+ */
+async function validateMentions(content: string, guild: Guild): Promise<string> {
+  const ids = new Set([...content.matchAll(/<@!?(\d{15,25})>/g)].map((match) => match[1]));
+  if (ids.size === 0) return content;
+
+  let result = content;
+  for (const id of ids) {
+    if (guild.members.cache.has(id)) continue;
+
+    const member = await guild.members.fetch(id).catch(() => null);
+    if (!member) result = result.replace(new RegExp(`<@!?${id}>`, 'g'), `@${id}`);
+  }
+
+  return result;
 }
 
 function describeError(err: unknown): string {

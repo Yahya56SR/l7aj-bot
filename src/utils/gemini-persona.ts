@@ -26,6 +26,7 @@ import {
   type FunctionResponse,
   type LiveConnectConfig,
   type LiveServerMessage,
+  type Part,
   type Session,
   type ThinkingConfig,
   Type,
@@ -42,10 +43,24 @@ export type PersonaToolExecutor = (
   call: PersonaToolCall,
 ) => Promise<Record<string, unknown>> | Record<string, unknown>;
 
+/** One image/GIF supplied to the model alongside the text event. */
+export interface PersonaMedia {
+  /** IANA MIME type, e.g. `image/png`. */
+  mimeType: string;
+  /** Base64-encoded bytes. */
+  data: string;
+  /** Optional label used in logs, e.g. the original filename. */
+  label?: string;
+}
+
 export interface PersonaDecision {
   action: 'reply' | 'silent';
-  /** Empty for `silent`. */
+  /** Empty for `silent` or for a sticker-only reply. */
   message: string;
+  /** A real server sticker id when the model chose to send a sticker. */
+  stickerId?: string;
+  /** Send the reply as a native Discord reply to the triggering message. */
+  replyToTrigger?: boolean;
   /** Names of the tools the model called while making this decision. */
   toolCalls: string[];
 }
@@ -54,7 +69,7 @@ export interface GeminiLivePersonaOptions {
   apiKey: string;
   model: string;
   systemPrompt: string;
-  /** Extra tools. `send_message` and `stay_silent` are always added. */
+  /** Extra tools. `send_message`, `send_sticker` and `stay_silent` are always added. */
   tools?: FunctionDeclaration[];
   /** Required for `gemini-3.8-live-extended-thinking`, ignored for `gemini-3.8-live`. */
   thinkingLevel?: string;
@@ -83,6 +98,7 @@ const MAX_TOOL_CALLS_PER_BATCH = 6;
 const MAX_REPLY_LENGTH = 2_000;
 
 const SEND_MESSAGE_TOOL = 'send_message';
+const SEND_STICKER_TOOL = 'send_sticker';
 const STAY_SILENT_TOOL = 'stay_silent';
 
 const DECISION_TOOL_DECLARATIONS: FunctionDeclaration[] = [
@@ -98,8 +114,40 @@ const DECISION_TOOL_DECLARATIONS: FunctionDeclaration[] = [
           type: Type.STRING,
           description: 'The exact Discord message to send. Plain text, no labels or JSON.',
         },
+        reply: {
+          type: Type.BOOLEAN,
+          description:
+            'True to send as a native Discord reply to the triggering message (this notifies its author). ' +
+            'False or omitted for a bare channel message.',
+        },
       },
       required: ['message'],
+    },
+  },
+  {
+    name: SEND_STICKER_TOOL,
+    description:
+      'Send one real server sticker as this character. Call get_server_stickers first to obtain a real sticker id. ' +
+      'Call exactly once when you choose to reply with a sticker. Do not call it again in the same turn.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        sticker_id: {
+          type: Type.STRING,
+          description: 'A real sticker id returned by get_server_stickers.',
+        },
+        message: {
+          type: Type.STRING,
+          description: 'Optional text to send with the sticker. Plain text, no labels or JSON.',
+        },
+        reply: {
+          type: Type.BOOLEAN,
+          description:
+            'True to send as a native Discord reply to the triggering message (this notifies its author). ' +
+            'False or omitted for a bare channel message.',
+        },
+      },
+      required: ['sticker_id'],
     },
   },
   {
@@ -120,6 +168,7 @@ const DECISION_TOOL_DECLARATIONS: FunctionDeclaration[] = [
 
 interface QueuedItem {
   text: string;
+  media: PersonaMedia[];
   executeTool: PersonaToolExecutor;
   resolve: (value: PersonaDecision | null) => void;
   settled: boolean;
@@ -188,7 +237,12 @@ export class GeminiLivePersona {
    * `executeTool` is per-event because the tools need the Discord context of
    * the message that triggered this turn.
    */
-  ask(text: string, executeTool: PersonaToolExecutor, timeoutMs?: number): Promise<PersonaDecision | null> {
+  ask(
+    text: string,
+    executeTool: PersonaToolExecutor,
+    timeoutMs?: number,
+    media: PersonaMedia[] = [],
+  ): Promise<PersonaDecision | null> {
     if (!text || !text.trim() || this.closed) return Promise.resolve(null);
 
     if (this.queue.length >= this.maxQueueSize) {
@@ -204,6 +258,7 @@ export class GeminiLivePersona {
     return new Promise<PersonaDecision | null>((resolve) => {
       const item: QueuedItem = {
         text,
+        media: media.slice(0, 4),
         executeTool,
         resolve,
         settled: false,
@@ -290,13 +345,21 @@ export class GeminiLivePersona {
     this.requestsInSession += 1;
 
     try {
+      const parts: Part[] = [
+        ...item.media.map((media) => ({
+          inlineData: { mimeType: media.mimeType, data: media.data },
+        })),
+        { text: this.buildPayload(item.text) },
+      ];
+
       session.sendClientContent({
-        turns: [{ role: 'user', parts: [{ text: this.buildPayload(item.text) }] }],
+        turns: [{ role: 'user', parts }],
         turnComplete: true,
       });
       console.debug('[L7aj:Live] Event sent', {
         requestsInSession: this.requestsInSession,
         length: item.text.length,
+        media: item.media.length,
       });
     } catch (err) {
       console.warn('[L7aj:Live] Failed to send event:', describeError(err));
@@ -551,7 +614,7 @@ export class GeminiLivePersona {
       .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' ')
       .slice(0, MAX_EVENT_LENGTH);
 
-    return `${safe}\n\nDecide now. Call exactly one of \`${SEND_MESSAGE_TOOL}\` or \`${STAY_SILENT_TOOL}\`.`;
+    return `${safe}\n\nDecide now. Call exactly one of \`${SEND_MESSAGE_TOOL}\`, \`${SEND_STICKER_TOOL}\` or \`${STAY_SILENT_TOOL}\`.`;
   }
 
   // ---------------------------------------------------------------------------
@@ -687,9 +750,41 @@ export class GeminiLivePersona {
       item.decision = {
         action: 'reply',
         message: truncated ? message.slice(0, MAX_REPLY_LENGTH) : message,
+        replyToTrigger: toBoolean(call.args?.reply),
         toolCalls: [...item.toolCallNames],
       };
       return { ok: true, status: 'queued', truncated };
+    }
+
+    if (name === SEND_STICKER_TOOL) {
+      if (item.decision) {
+        return { ok: false, error: 'A decision was already made for this turn.' };
+      }
+
+      const rawStickerId = call.args?.sticker_id;
+      const stickerId =
+        typeof rawStickerId === 'string'
+          ? rawStickerId.trim()
+          : typeof rawStickerId === 'number'
+            ? String(rawStickerId)
+            : '';
+      if (!/^\d{15,25}$/.test(stickerId)) {
+        return {
+          ok: false,
+          error: 'A real numeric sticker id is required. Call get_server_stickers first.',
+        };
+      }
+
+      const raw = typeof call.args?.message === 'string' ? call.args.message : '';
+      const message = sanitizeReply(raw);
+      item.decision = {
+        action: 'reply',
+        message: message.length > MAX_REPLY_LENGTH ? message.slice(0, MAX_REPLY_LENGTH) : message,
+        stickerId,
+        replyToTrigger: toBoolean(call.args?.reply),
+        toolCalls: [...item.toolCallNames],
+      };
+      return { ok: true, status: 'queued' };
     }
 
     if (name === STAY_SILENT_TOOL) {
@@ -746,6 +841,8 @@ export class GeminiLivePersona {
       action: decision?.action ?? 'none',
       toolCalls,
       messageLength: decision?.message.length ?? 0,
+      stickerId: decision?.stickerId ?? null,
+      reply: decision?.replyToTrigger ?? false,
     });
 
     if (!item.settled) {
@@ -810,6 +907,10 @@ export class GeminiLivePersona {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function toBoolean(value: unknown): boolean {
+  return value === true || value === 1 || value === 'true' || value === '1';
 }
 
 function sanitizeReply(value: string): string {
