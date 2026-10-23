@@ -45,6 +45,18 @@ const BUTTON_STYLES = [
   { value: 4, label: 'Danger (red)' },
 ];
 
+const MATCH_TYPES = [
+  { value: 'contains', label: 'Contains' },
+  { value: 'exact', label: 'Exact match' },
+  { value: 'startsWith', label: 'Starts with' },
+  { value: 'regex', label: 'Regular expression' },
+];
+
+const RESPOND_IN = [
+  { value: 'channel', label: 'In the channel' },
+  { value: 'dm', label: 'Direct message' },
+];
+
 const ICONS = {
   overview:
     '<rect x="3" y="3" width="7.5" height="9.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="5.5" rx="2"/><rect x="13.5" y="12" width="7.5" height="9" rx="2"/><rect x="3" y="16" width="7.5" height="5" rx="2"/>',
@@ -55,6 +67,8 @@ const ICONS = {
     '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-3.8-.8L3 21l1.9-5.1A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/><path d="M8.5 11.5h7M12 8v7"/>',
   autoreact:
     '<path d="M12 3.2l1.9 4.6 4.6 1.9-4.6 1.9L12 16.2l-1.9-4.6L5.5 9.7l4.6-1.9z"/><path d="M18 15.5l.9 2.1 2.1.9-2.1.9L18 21.5l-.9-2.1-2.1-.9 2.1-.9z"/>',
+  autoreply:
+    '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-3.8-.8L3 21l1.9-5.1A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z"/><path d="M8.5 11.5h7M13 8.5l3 3-3 3"/>',
   roles:
     '<path d="M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.6" cy="7.6" r="1.4"/>',
   tickets:
@@ -84,6 +98,7 @@ const sections = [
   { id: 'channels', label: 'Channels & Logging', icon: 'channels', group: 'Engagement', subtitle: 'Announcements and server event logs', render: renderChannels },
   { id: 'greetings', label: 'Welcome & Goodbye', icon: 'greetings', group: 'Engagement', subtitle: 'Join and leave messages, cards and tests', render: renderGreetings },
   { id: 'autoreact', label: 'Auto-reactions', icon: 'autoreact', group: 'Engagement', subtitle: 'Emojis added automatically per channel', render: renderAutoReact },
+  { id: 'autoreply', label: 'Auto-replies', icon: 'autoreply', group: 'Engagement', subtitle: 'Keyword-triggered replies per channel', render: renderAutoReply },
   { id: 'roles', label: 'Role Panels', icon: 'roles', group: 'Community', subtitle: 'Button panels, reaction roles and verification', render: renderRoles },
   { id: 'tickets', label: 'Tickets', icon: 'tickets', group: 'Community', subtitle: 'Panels, forms, staff roles and auto-close', render: renderTickets },
   { id: 'automod', label: 'AutoMod & AI', icon: 'shield', group: 'Protection', subtitle: 'Filters, exemptions and Gemini moderation', render: renderAutomod },
@@ -402,6 +417,12 @@ async function onDocumentClick(event) {
       case 'remove-auto-react':
         state.config.autoReactions.splice(Number(button.dataset.index), 1);
         redraw();
+        return;
+      case 'add-auto-reply':
+        addAutoReply();
+        return;
+      case 'remove-auto-reply':
+        removeAutoReply(Number(button.dataset.index));
         return;
       case 'test-welcome':
         await runAction('/api/actions/test-welcome', {}, 'Test welcome sent.');
@@ -723,6 +744,39 @@ function addAutoReact() {
   }
   state.config.autoReactions = state.config.autoReactions.filter((entry) => entry.channelId !== channelId);
   state.config.autoReactions.push({ channelId, emojis });
+  redraw();
+}
+
+function addAutoReply() {
+  if (!state.config.autoReplies || typeof state.config.autoReplies !== 'object') {
+    state.config.autoReplies = { enabled: false, rules: [] };
+  }
+  if (!Array.isArray(state.config.autoReplies.rules)) state.config.autoReplies.rules = [];
+
+  const rules = state.config.autoReplies.rules;
+  rules.push({
+    id: nextId('r', rules),
+    name: `Rule ${rules.length + 1}`,
+    enabled: true,
+    channelIds: [],
+    bypassRoleIds: [],
+    matchType: 'contains',
+    triggers: [],
+    reply: '',
+    respondIn: 'channel',
+    pingAuthor: false,
+    deleteTrigger: false,
+    caseSensitive: false,
+    cooldownSeconds: 30,
+  });
+  redraw();
+}
+
+function removeAutoReply(index) {
+  const rules = state.config.autoReplies && state.config.autoReplies.rules;
+  if (!Array.isArray(rules) || index < 0 || index >= rules.length) return;
+  if (!window.confirm('Remove this auto-reply rule?')) return;
+  rules.splice(index, 1);
   redraw();
 }
 
@@ -1168,6 +1222,7 @@ function renderOverview() {
   const quickToggles = [
     toggle('welcome.enabled', cfg.welcome.enabled, 'Welcome messages', 'Greet members when they join'),
     toggle('goodbye.enabled', cfg.goodbye.enabled, 'Goodbye messages', 'Announce members who leave'),
+    toggle('autoReplies.enabled', (cfg.autoReplies || {}).enabled, 'Auto-replies', 'Reply to keyword triggers automatically'),
     toggle('logging.enabled', cfg.logging.enabled, 'Server logging', 'Send server events to the log channel'),
     toggle('automod.blockUrls', cfg.automod.blockUrls, 'Block URLs', 'Delete messages containing links'),
     toggle('automod.blockGifs', cfg.automod.blockGifs, 'Block GIFs', 'Delete GIF uploads and links'),
@@ -1677,6 +1732,77 @@ function renderAutoReact() {
         <input class="input" id="new-autoreact-emojis" placeholder="Emojis (e.g. 👍, 🔥)" style="max-width:280px">
         <button class="btn small" data-action="add-auto-react">Add channel</button>
       </div>`, { subtitle: 'React automatically to new messages' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: auto-replies                                                */
+/* ------------------------------------------------------------------ */
+
+function renderAutoReply() {
+  const cfg = state.config.autoReplies || { enabled: false, rules: [] };
+  const rules = Array.isArray(cfg.rules) ? cfg.rules : [];
+  const cards = rules.length
+    ? rules.map((rule, index) => autoReplyCard(rule, index)).join('')
+    : '<div class="empty">No auto-reply rules yet. Click “New rule” to add one.</div>';
+
+  return `<p class="intro">Reply automatically when a message matches one of your trigger phrases. Rules are checked in order and the
+    first match replies once per message — bots are ignored, so a reply can never trigger another reply.</p>
+
+    ${card('Auto-reply engine', `${toggle('autoReplies.enabled', cfg.enabled, 'Enable auto-replies', 'While this is off, no rule runs.')}
+      <div class="btn-row"><button class="btn small" data-action="add-auto-reply">New rule</button></div>`, {
+        subtitle: 'Keyword-triggered replies',
+      })}
+
+    ${cards}`;
+}
+
+function autoReplyCard(rule, index) {
+  const base = `autoReplies.rules.${index}`;
+
+  return `<div class="panel-card">
+    <div class="panel-card-head">
+      <div class="panel-card-title">
+        <span class="pill accent">${esc(rule.id)}</span>
+        ${textInput(`${base}.name`, rule.name, { placeholder: 'Rule name' })}
+      </div>
+      <div class="card-actions">
+        <button class="btn small danger" data-action="remove-auto-reply" data-index="${index}">Delete</button>
+      </div>
+    </div>
+    <div class="panel-card-body">
+      ${toggle(`${base}.enabled`, rule.enabled, 'Rule enabled')}
+      ${grid([
+        field('Match type', select(`${base}.matchType`, rule.matchType, MATCH_TYPES), 'Regex rules use JavaScript syntax.'),
+        field('Reply in', select(`${base}.respondIn`, rule.respondIn, RESPOND_IN), 'DM replies are skipped when a member blocks DMs.'),
+        field('Cooldown (seconds)', numberInput(`${base}.cooldownSeconds`, rule.cooldownSeconds, { min: 0, max: 86400 }), 'Per member, per rule. 0 = reply to every match.'),
+      ], 3)}
+      ${field(
+        'Triggers',
+        `<input class="input" data-path="${esc(base)}.triggers" data-type="csv" value="${esc((rule.triggers || []).join(', '))}" placeholder="hello, salam, hi">`,
+        'Comma-separated. Any trigger fires the rule.',
+      )}
+      ${field(
+        'Reply',
+        textarea(`${base}.reply`, rule.reply, { rows: 3, placeholder: 'Salam {username}! 👋' }),
+        'Placeholders: {user} (mention), {username}, {server}, {channel}, {message}, {trigger}',
+      )}
+      <div class="grid cols-2">
+        ${toggle(`${base}.caseSensitive`, rule.caseSensitive, 'Case sensitive')}
+        ${toggle(`${base}.pingAuthor`, rule.pingAuthor, 'Allow the reply to ping the author')}
+        ${toggle(`${base}.deleteTrigger`, rule.deleteTrigger, 'Delete the triggering message', 'Needs Manage Messages.')}
+      </div>
+      <div class="field">
+        <span class="field-label">Channels</span>
+        ${chipList(`${base}.channelIds`, rule.channelIds || [], 'channel')}
+        <span class="hint">Empty = every channel the bot can read. Threads must be added by their own id.</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Bypass roles</span>
+        ${chipList(`${base}.bypassRoleIds`, rule.bypassRoleIds || [], 'role')}
+        <span class="hint">Members with any of these roles never trigger this rule.</span>
+      </div>
+    </div>
+  </div>`;
 }
 
 /* ------------------------------------------------------------------ */

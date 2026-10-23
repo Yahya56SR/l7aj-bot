@@ -79,6 +79,45 @@ export interface AutoReactionChannel {
   emojis: string[];
 }
 
+/** How a trigger phrase is compared against the message content. */
+export type AutoReplyMatchType = 'exact' | 'contains' | 'startsWith' | 'regex';
+
+export interface AutoReplyRule {
+  /** Stable internal id (r1, r2, ...) */
+  id: string;
+  /** Human readable label shown in the dashboard */
+  name: string;
+  /** When false the rule is skipped */
+  enabled: boolean;
+  /** Channels the rule listens in (empty = every channel) */
+  channelIds: string[];
+  /** Roles that never trigger this rule */
+  bypassRoleIds: string[];
+  /** How trigger phrases are matched */
+  matchType: AutoReplyMatchType;
+  /** Trigger phrases; any one of them fires the reply */
+  triggers: string[];
+  /** Reply template. Placeholders: {user} {username} {server} {channel} {message} {trigger} */
+  reply: string;
+  /** Reply in the originating channel or in the author's DMs */
+  respondIn: 'channel' | 'dm';
+  /** When true the reply may ping the author */
+  pingAuthor: boolean;
+  /** Delete the triggering message after replying (needs Manage Messages) */
+  deleteTrigger: boolean;
+  /** When true triggers match case exactly */
+  caseSensitive: boolean;
+  /** Seconds before the same member can trigger this rule again (0 = no cooldown) */
+  cooldownSeconds: number;
+}
+
+export interface AutoRepliesConfig {
+  /** Master switch for the whole auto-reply engine */
+  enabled: boolean;
+  /** Rules are checked in order; the first match replies once */
+  rules: AutoReplyRule[];
+}
+
 export interface WelcomeConfig {
   /** Channel to send welcome messages */
   channelId: string;
@@ -270,6 +309,8 @@ export interface BotConfig {
   automod: AutomodConfig;
   /** Auto-reaction configuration: react to every message in specific channels with configured emojis */
   autoReactions: AutoReactionChannel[];
+  /** Keyword-triggered automatic replies */
+  autoReplies: AutoRepliesConfig;
   /** Welcome message configuration */
   welcome: WelcomeConfig;
   /** Goodbye message configuration */
@@ -383,6 +424,10 @@ const DEFAULT_CONFIG: BotConfig = {
     },
   },
   autoReactions: [],
+  autoReplies: {
+    enabled: false,
+    rules: [],
+  },
   welcome: {
     channelId: '',
     message: 'Welcome {user} to {server}! 🎉',
@@ -509,6 +554,13 @@ function normalizeConfig(parsed: any): BotConfig {
       },
     },
     autoReactions: Array.isArray(source.autoReactions) ? source.autoReactions : [],
+    autoReplies: {
+      ...DEFAULT_CONFIG.autoReplies,
+      ...(source.autoReplies && typeof source.autoReplies === 'object' && !Array.isArray(source.autoReplies)
+        ? source.autoReplies
+        : {}),
+      rules: Array.isArray(source.autoReplies?.rules) ? source.autoReplies.rules : [],
+    },
     welcome: { ...DEFAULT_CONFIG.welcome, ...(source.welcome || {}) },
     goodbye: { ...DEFAULT_CONFIG.goodbye, ...(source.goodbye || {}) },
     tickets: {
@@ -652,6 +704,32 @@ function sanitizeConfig(cfg: BotConfig): void {
       emojis: asStringArray(entry?.emojis),
     }))
     .filter((entry) => entry.channelId !== '');
+
+  const autoReplies = cfg.autoReplies;
+  autoReplies.enabled = asBool(autoReplies.enabled, false);
+  const matchTypes = ['exact', 'contains', 'startsWith', 'regex'];
+  autoReplies.rules = (Array.isArray(autoReplies.rules) ? autoReplies.rules : [])
+    .slice(0, 100)
+    .map((rule, index) => {
+      const matchType = asString(rule?.matchType, 'contains');
+      return {
+        id: asString(rule?.id) || `r${index + 1}`,
+        name: asString(rule?.name, `Rule ${index + 1}`).trim().slice(0, 100) || `Rule ${index + 1}`,
+        enabled: asBool(rule?.enabled, true),
+        channelIds: asStringArray(rule?.channelIds),
+        bypassRoleIds: asStringArray(rule?.bypassRoleIds),
+        matchType: (matchTypes.includes(matchType) ? matchType : 'contains') as AutoReplyMatchType,
+        triggers: asStringArray(rule?.triggers)
+          .slice(0, 25)
+          .map((trigger) => trigger.slice(0, 200)),
+        reply: asString(rule?.reply).slice(0, 2000),
+        respondIn: rule?.respondIn === 'dm' ? ('dm' as const) : ('channel' as const),
+        pingAuthor: asBool(rule?.pingAuthor, false),
+        deleteTrigger: asBool(rule?.deleteTrigger, false),
+        caseSensitive: asBool(rule?.caseSensitive, false),
+        cooldownSeconds: asInt(rule?.cooldownSeconds, 30, 0, 86_400),
+      };
+    });
 
   cfg.welcome.channelId = asString(cfg.welcome.channelId);
   cfg.welcome.message = asString(cfg.welcome.message);

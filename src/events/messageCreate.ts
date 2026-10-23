@@ -4,6 +4,7 @@ import { getConfig } from '../config';
 import { randomXp } from '../utils/level';
 import { handleLevelUp } from '../handlers/levelUp';
 import { runAutomod } from '../utils/automod';
+import { handleAutoReplies } from '../utils/autoReply';
 
 // Map of userId -> expiry timestamp (Date.now() + cooldownMs)
 const userCooldowns = new Map<string, number>();
@@ -47,6 +48,14 @@ export async function handleMessageCreate(message: Message): Promise<void> {
       await handleAutoReactions(message, cfg);
     } catch (err) {
       console.error('Auto-reaction failed:', err);
+    }
+
+    // Auto-replies are also independent of XP. The handler ignores bots itself,
+    // and replies to at most one rule per message.
+    try {
+      await handleAutoReplies(message);
+    } catch (err) {
+      console.error('Auto-reply failed:', err);
     }
   }
 

@@ -108,6 +108,27 @@
     }
   ],
 
+  "autoReplies": {
+    "enabled": false,
+    "rules": [
+      {
+        "id": "r1",
+        "name": "Greeting",
+        "enabled": true,
+        "channelIds": [],
+        "bypassRoleIds": [],
+        "matchType": "contains",
+        "triggers": ["hello", "salam"],
+        "reply": "Salam {username}! 👋",
+        "respondIn": "channel",
+        "pingAuthor": false,
+        "deleteTrigger": false,
+        "caseSensitive": false,
+        "cooldownSeconds": 30
+      }
+    ]
+  },
+
   "welcome": {
     "channelId": "WELCOME_CHANNEL_ID_HERE",
     "message": "Welcome {user} to {server}! 🎉",
