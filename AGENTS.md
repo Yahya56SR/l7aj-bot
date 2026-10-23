@@ -27,11 +27,12 @@
 - Log channel resolves to `config.logging.channelId` when set, otherwise `config.channels.logs`. Logging fails open (never blocks core functionality).
 - Paths for `config.json`, `data/`, fonts and dashboard assets resolve via `__dirname/..`, so both `tsx src/...` and `dist/` builds work from anywhere. Exception: `welcome.backgroundImage` resolves against `process.cwd()` — run the bot from the repo root.
 - XP: MEE6 math `5*L² + 50*L + 100`; random 15–25/msg with 60s cooldown, 5–8/voice minute, bots ignored by default. Rank cards are PNGs via `@napi-rs/canvas` with a text-embed fallback.
+- Live leaderboard (`src/utils/liveLeaderboard.ts`): one persistent message (`config.liveLeaderboard.channelId/messageId`) re-rendered every `intervalMinutes` by a 60s scheduler started in `clientReady` — the interval is re-read each tick, so dashboard edits apply live. It posts a top-3 podium PNG plus an embed (Top 3, rank zones, progress bars) and is separate from `/leaderboard`, which still renders per call. Unchanged data skips the edit; a missing message id/channel re-posts and saves the new id.
 
 ## Dashboard
 - `src/dashboard/server.ts` + plain HTML/CSS/JS in `dashboard/`. No build step: editing those files only needs a browser refresh, not a bot restart.
 - CSP is strict: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:`. No inline `<script>`, no CDN scripts/fonts — new JS must be a file under `dashboard/`.
-- Routes: `GET /api/session`, `POST /api/login|logout`, `GET /api/health|guild|stats|config`, `PUT /api/config`, `POST /api/secrets`, `POST /api/actions/reload-config|test-welcome|test-goodbye|publish-role-panel|publish-ticket-panel`, `POST /api/ai/test`.
+- Routes: `GET /api/session`, `POST /api/login|logout`, `GET /api/health|guild|stats|config`, `PUT /api/config`, `POST /api/secrets`, `POST /api/actions/reload-config|test-welcome|test-goodbye|publish-role-panel|publish-ticket-panel|publish-live-leaderboard`, `POST /api/ai/test`.
 - `GET /api/config` omits `token` and returns the Gemini key as `__REDACTED__`. `PUT /api/config` requires the returned `revision` (sha256 of the live config, 16 chars) and returns `409` if a slash command changed it meanwhile. Secrets go only through `POST /api/secrets`.
 - Auth is loopback-only by default; a non-loopback `DASHBOARD_HOST` refuses to start without `DASHBOARD_PASSWORD`. Sessions are in memory (12h HttpOnly cookie), so a restart signs everyone out.
 - Dashboard actions that need Discord (publish/test) fail when the bot is not logged in, but the dashboard itself still starts — that is how a broken token gets fixed.

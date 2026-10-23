@@ -22,6 +22,7 @@ import { handleGuildMemberAdd, handleGuildMemberRemove } from './events/guildMem
 import { registerLoggingEvents } from './events/logging';
 import { logCommandUsage } from './utils/logger';
 import { startDashboard } from './dashboard/server';
+import { startLiveLeaderboard, stopLiveLeaderboard } from './utils/liveLeaderboard';
 
 dotenv.config();
 loadConfig();
@@ -88,6 +89,11 @@ client.on('clientReady', () => {
       console.error('Ticket auto-close error:', err);
     }
   }, 5 * 60 * 1000);
+
+  // One persistent leaderboard message, re-rendered on the configured
+  // interval. Reading the interval on every tick means dashboard edits apply
+  // without a restart.
+  startLiveLeaderboard(client);
 });
 
 client.on('messageCreate', async (message) => {
@@ -243,6 +249,7 @@ process.on('SIGINT', async () => {
   console.log('Shutting down...');
   if (voiceTickInterval) clearInterval(voiceTickInterval);
   if (ticketSweepInterval) clearInterval(ticketSweepInterval);
+  stopLiveLeaderboard();
   dashboardServer?.close();
   client.destroy();
   process.exit(0);
@@ -252,6 +259,7 @@ process.on('SIGTERM', async () => {
   console.log('Shutting down...');
   if (voiceTickInterval) clearInterval(voiceTickInterval);
   if (ticketSweepInterval) clearInterval(ticketSweepInterval);
+  stopLiveLeaderboard();
   dashboardServer?.close();
   client.destroy();
   process.exit(0);

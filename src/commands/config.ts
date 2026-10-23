@@ -8,6 +8,11 @@ import {
 import { getConfig, updateConfig } from '../config';
 import { GeminiLiveModerator } from '../utils/gemini-live';
 import { logConfigChange } from '../utils/logger';
+import {
+  invalidateLiveLeaderboard,
+  refreshLiveLeaderboard,
+  type LiveLeaderboardResult,
+} from '../utils/liveLeaderboard';
 
 export const data = new SlashCommandBuilder()
   .setName('config')
@@ -277,6 +282,49 @@ export const data = new SlashCommandBuilder()
           .setDescription('Send a test goodbye message to the configured channel'),
       )
       .addSubcommand((sub) => sub.setName('disable').setDescription('Disable goodbye messages')),
+  )
+  .addSubcommandGroup((group) =>
+    group
+      .setName('leaderboard')
+      .setDescription('Configure the single self-updating leaderboard message')
+      .addSubcommand((sub) =>
+        sub
+          .setName('setup')
+          .setDescription('Post (or re-point) the persistent leaderboard message')
+          .addChannelOption((opt) =>
+            opt
+              .setName('channel')
+              .setDescription('Channel that will hold the leaderboard message')
+              .setRequired(true)
+              .addChannelTypes(ChannelType.GuildText),
+          )
+          .addIntegerOption((opt) =>
+            opt
+              .setName('interval-minutes')
+              .setDescription('How often to refresh (1-1440, default 10)')
+              .setMinValue(1)
+              .setMaxValue(1440),
+          )
+          .addIntegerOption((opt) =>
+            opt
+              .setName('rows')
+              .setDescription('How many ranked members to show (3-25, default 25)')
+              .setMinValue(3)
+              .setMaxValue(25),
+          )
+          .addStringOption((opt) =>
+            opt.setName('title').setDescription('Optional embed title (default: server name)').setMaxLength(200),
+          )
+          .addBooleanOption((opt) =>
+            opt.setName('enabled').setDescription('Enable automatic updates (default true)'),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub.setName('refresh').setDescription('Refresh the leaderboard message right now'),
+      )
+      .addSubcommand((sub) =>
+        sub.setName('disable').setDescription('Stop updating the leaderboard message'),
+      ),
   );
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -309,6 +357,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   // Handle goodbye subcommands
   if (subcommandGroup === 'goodbye') {
     await handleGoodbyeConfig(interaction, subcommand);
+    return;
+  }
+
+  // Handle live leaderboard subcommands
+  if (subcommandGroup === 'leaderboard') {
+    await handleLeaderboardConfig(interaction, subcommand);
     return;
   }
 
@@ -422,6 +476,13 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         name: 'Goodbye',
         value: cfg.goodbye.enabled
           ? `✅ Enabled · Channel: <#${cfg.goodbye.channelId}>\nMessage: \`${cfg.goodbye.message}\``
+          : '❌ Disabled',
+        inline: false,
+      },
+      {
+        name: 'Live leaderboard',
+        value: cfg.liveLeaderboard.enabled
+          ? `✅ Enabled · Channel: <#${cfg.liveLeaderboard.channelId}> · every ${cfg.liveLeaderboard.intervalMinutes} min · top ${cfg.liveLeaderboard.rows}`
           : '❌ Disabled',
         inline: false,
       },
@@ -987,6 +1048,108 @@ async function handleGoodbyeConfig(interaction: ChatInputCommandInteraction, sub
         interaction.client as { channels: { cache: Map<string, any> } },
       ).catch((err) => console.error('[Logging] config change error:', err));
       await interaction.reply({ content: '✅ Goodbye messages disabled.', ephemeral: true });
+      break;
+    }
+  }
+}
+
+function describeLeaderboardResult(result: LiveLeaderboardResult): string {
+  switch (result.status) {
+    case 'created':
+      return `✅ Leaderboard posted in <#${result.channelId}> (${result.entries} ranked members). It will keep updating itself.`;
+    case 'updated':
+      return `✅ Leaderboard refreshed in <#${result.channelId}> (${result.entries} ranked members).`;
+    case 'unchanged':
+      return '✅ Leaderboard is already up to date.';
+    case 'empty':
+      return '⚠️ No XP records yet, so there is nothing to display.';
+    case 'no-channel':
+      return '❌ The configured channel is missing or the bot cannot post there.';
+    case 'no-guild':
+      return '❌ The bot is not connected to the server yet. Try again in a moment.';
+    case 'disabled':
+      return '❌ The live leaderboard is disabled. Use `/config leaderboard setup` first.';
+    case 'error':
+      return '❌ Discord rejected the update. Check that the bot can send messages and embed links in that channel.';
+    default:
+      return '❌ Unknown leaderboard state.';
+  }
+}
+
+async function handleLeaderboardConfig(
+  interaction: ChatInputCommandInteraction,
+  subcommand: string,
+): Promise<void> {
+  switch (subcommand) {
+    case 'setup': {
+      const channel = interaction.options.getChannel('channel', true);
+      const intervalMinutes = interaction.options.getInteger('interval-minutes');
+      const rows = interaction.options.getInteger('rows');
+      const title = interaction.options.getString('title');
+      const enabled = interaction.options.getBoolean('enabled') ?? true;
+      const previousChannel = getConfig().liveLeaderboard.channelId;
+
+      // Rendering the podium plus a Discord round-trip can exceed the 3s
+      // interaction budget, so acknowledge before doing any work.
+      await interaction.deferReply({ ephemeral: true });
+
+      updateConfig((c) => {
+        c.liveLeaderboard.channelId = channel.id;
+        // A new channel means a new message; keeping the old id would make the
+        // bot try to edit a message that lives elsewhere.
+        if (previousChannel !== channel.id) c.liveLeaderboard.messageId = '';
+        if (intervalMinutes !== null) c.liveLeaderboard.intervalMinutes = intervalMinutes;
+        if (rows !== null) c.liveLeaderboard.rows = rows;
+        if (title !== null) c.liveLeaderboard.title = title;
+        c.liveLeaderboard.enabled = enabled;
+      });
+      invalidateLiveLeaderboard();
+
+      await logConfigChange(
+        interaction,
+        `Live leaderboard configured: channel ${channel}, every ${getConfig().liveLeaderboard.intervalMinutes} min, top ${getConfig().liveLeaderboard.rows}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
+
+      if (!enabled) {
+        await interaction.editReply({
+          content: `✅ Leaderboard settings saved and disabled.\nChannel: ${channel}\nRefresh: every ${getConfig().liveLeaderboard.intervalMinutes} min`,
+        });
+        return;
+      }
+
+      const result = await refreshLiveLeaderboard(interaction.client, { force: true });
+      await interaction.editReply({
+        content: `${describeLeaderboardResult(result)}\nRefreshes every ${getConfig().liveLeaderboard.intervalMinutes} min.`,
+      });
+      break;
+    }
+    case 'refresh': {
+      if (!getConfig().liveLeaderboard.enabled || !getConfig().liveLeaderboard.channelId) {
+        await interaction.reply({
+          content: '❌ The live leaderboard is not configured. Use `/config leaderboard setup` first.',
+          ephemeral: true,
+        });
+        return;
+      }
+      await interaction.deferReply({ ephemeral: true });
+      const result = await refreshLiveLeaderboard(interaction.client, { force: true });
+      await interaction.editReply({ content: describeLeaderboardResult(result) });
+      break;
+    }
+    case 'disable': {
+      updateConfig((c) => {
+        c.liveLeaderboard.enabled = false;
+      });
+      await logConfigChange(
+        interaction,
+        'Live leaderboard disabled.',
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
+      await interaction.reply({
+        content: '✅ Live leaderboard disabled. The existing message stays where it is.',
+        ephemeral: true,
+      });
       break;
     }
   }

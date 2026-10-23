@@ -350,6 +350,219 @@ export class LeaderboardCanvas {
   }
 }
 
+export interface PodiumEntry {
+  username: string;
+  avatarUrl: string;
+  level: number;
+  totalXp: number;
+}
+
+interface PodiumSlot {
+  entry?: PodiumEntry;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rank: 1 | 2 | 3;
+  avatarY: number;
+  avatarRadius: number;
+}
+
+const PODIUM_ACCENTS: Record<number, string> = {
+  1: '#f0b232',
+  2: '#c0c6cf',
+  3: '#cd7f32',
+};
+
+/**
+ * Top-3 podium image attached to the live leaderboard message: rank 2 on the
+ * left, rank 1 raised in the middle, rank 3 on the right.
+ */
+export class LeaderboardPodiumCanvas {
+  width = 1000;
+  height = 320;
+
+  async generate(entries: PodiumEntry[]): Promise<Buffer> {
+    ensureFonts();
+
+    const canvas = createCanvas(this.width, this.height);
+    const ctx = canvas.getContext('2d');
+
+    this.drawBackground(ctx);
+
+    const slots: PodiumSlot[] = [
+      { entry: entries[1], x: 60, y: 76, width: 272, height: 228, rank: 2, avatarY: 146, avatarRadius: 44 },
+      { entry: entries[0], x: 352, y: 34, width: 296, height: 270, rank: 1, avatarY: 140, avatarRadius: 56 },
+      { entry: entries[2], x: 668, y: 76, width: 272, height: 228, rank: 3, avatarY: 146, avatarRadius: 44 },
+    ];
+
+    for (const slot of slots) this.drawPanel(ctx, slot);
+    for (const slot of slots) {
+      if (slot.entry) await this.drawEntry(ctx, slot, slot.entry);
+    }
+
+    return canvas.toBuffer('image/png');
+  }
+
+  private drawBackground(ctx: SKRSContext2D): void {
+    const gradient = ctx.createLinearGradient(0, 0, this.width, this.height);
+    gradient.addColorStop(0, '#1e1f3a');
+    gradient.addColorStop(0.55, '#2b2d63');
+    gradient.addColorStop(1, '#171831');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    const glow = ctx.createRadialGradient(this.width / 2, 40, 10, this.width / 2, 40, 500);
+    glow.addColorStop(0, 'rgba(160, 51, 255, 0.28)');
+    glow.addColorStop(1, 'rgba(160, 51, 255, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, this.width, this.height);
+  }
+
+  private drawPanel(ctx: SKRSContext2D, slot: PodiumSlot): void {
+    const accent = PODIUM_ACCENTS[slot.rank];
+
+    this.roundedRect(ctx, slot.x, slot.y, slot.width, slot.height, 22);
+    const gradient = ctx.createLinearGradient(slot.x, slot.y, slot.x, slot.y + slot.height);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 0.09)');
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0.02)');
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    ctx.strokeStyle = slot.rank === 1 ? 'rgba(240, 178, 50, 0.5)' : 'rgba(255, 255, 255, 0.13)';
+    ctx.lineWidth = slot.rank === 1 ? 3 : 2;
+    ctx.stroke();
+
+    // Accent strip across the top of the panel
+    this.roundedRect(ctx, slot.x + slot.width * 0.2, slot.y, slot.width * 0.6, 5, 2.5);
+    ctx.fillStyle = accent;
+    ctx.fill();
+  }
+
+  private async drawEntry(
+    ctx: SKRSContext2D,
+    slot: PodiumSlot,
+    entry: PodiumEntry,
+  ): Promise<void> {
+    const accent = PODIUM_ACCENTS[slot.rank];
+    const centerX = slot.x + slot.width / 2;
+    const { avatarY, avatarRadius } = slot;
+
+    if (slot.rank === 1) {
+      this.drawCrown(ctx, centerX, avatarY - avatarRadius - 28, 46, accent);
+    }
+
+    // Avatar with a rank-coloured ring
+    await this.drawAvatar(ctx, entry.avatarUrl, centerX, avatarY, avatarRadius, accent);
+
+    // Name
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = `bold 25px ${FONT_STACK}`;
+    ctx.fillStyle = '#FFFFFF';
+    const nameY = avatarY + avatarRadius + 32;
+    ctx.fillText(
+      ellipsize((t) => ctx.measureText(t).width, entry.username, slot.width - 28),
+      centerX,
+      nameY,
+    );
+
+    // Level and XP
+    ctx.font = `17px ${FONT_STACK}`;
+    ctx.fillStyle = '#b9bbbe';
+    ctx.fillText(
+      `Lv ${entry.level} · ${Math.floor(entry.totalXp).toLocaleString('en-US')} XP`,
+      centerX,
+      nameY + 26,
+    );
+
+    // Rank number at the bottom of the panel
+    ctx.font = `bold 28px ${FONT_STACK}`;
+    ctx.fillStyle = accent;
+    ctx.fillText(`${slot.rank}`, centerX, slot.y + slot.height - 18);
+  }
+
+  private async drawAvatar(
+    ctx: SKRSContext2D,
+    avatarUrl: string,
+    x: number,
+    y: number,
+    radius: number,
+    ringColor: string,
+  ): Promise<void> {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2, true);
+    ctx.closePath();
+    ctx.clip();
+
+    try {
+      if (!avatarUrl) throw new Error('no avatar');
+      const avatar = await loadImage(avatarUrl);
+      const size = Math.max(avatar.width, avatar.height);
+      ctx.drawImage(avatar, x - size / 2, y - size / 2, size, size);
+    } catch {
+      const fallback = ctx.createLinearGradient(x - radius, y - radius, x + radius, y + radius);
+      fallback.addColorStop(0, '#5865f2');
+      fallback.addColorStop(1, '#a033ff');
+      ctx.fillStyle = fallback;
+      ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    }
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2, true);
+    ctx.strokeStyle = ringColor;
+    ctx.lineWidth = slotRingWidth(radius);
+    ctx.stroke();
+  }
+
+  private drawCrown(ctx: SKRSContext2D, cx: number, cy: number, width: number, color: string): void {
+    const half = width / 2;
+    const height = width * 0.55;
+    const top = cy - height / 2;
+    const bottom = cy + height / 2;
+
+    ctx.beginPath();
+    ctx.moveTo(cx - half, bottom);
+    ctx.lineTo(cx - half, top + height * 0.22);
+    ctx.lineTo(cx - half * 0.45, top + height * 0.68);
+    ctx.lineTo(cx, top);
+    ctx.lineTo(cx + half * 0.45, top + height * 0.68);
+    ctx.lineTo(cx + half, top + height * 0.22);
+    ctx.lineTo(cx + half, bottom);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+
+    ctx.fillRect(cx - half, bottom - 2, width, 7);
+  }
+
+  private roundedRect(
+    ctx: SKRSContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    radius: number,
+  ): void {
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + width, y, x + width, y + height, r);
+    ctx.arcTo(x + width, y + height, x, y + height, r);
+    ctx.arcTo(x, y + height, x, y, r);
+    ctx.arcTo(x, y, x + width, y, r);
+    ctx.closePath();
+  }
+}
+
+/** Thicker ring for the big centre avatar. */
+function slotRingWidth(radius: number): number {
+  return Math.max(4, Math.round(radius / 12));
+}
+
 export const rankCard = new RankCardCanvas();
 export const leaderboardCard = new LeaderboardCanvas();
+export const leaderboardPodium = new LeaderboardPodiumCanvas();
 export default rankCard;

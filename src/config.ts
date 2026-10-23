@@ -186,6 +186,21 @@ export interface LoggingCategoryConfig {
   config: boolean;
 }
 
+export interface LiveLeaderboardConfig {
+  /** When false the timer is skipped and the message is left untouched */
+  enabled: boolean;
+  /** Channel that holds the persistent leaderboard message */
+  channelId: string;
+  /** Message id of the persistent leaderboard (managed by the bot) */
+  messageId: string;
+  /** How often the message is refreshed, in minutes (1-1440) */
+  intervalMinutes: number;
+  /** How many ranked members appear in the embed (3-25) */
+  rows: number;
+  /** Optional title override; empty uses the guild name */
+  title: string;
+}
+
 export interface LoggingConfig {
   /** Whether server event logging is enabled at all */
   enabled: boolean;
@@ -233,6 +248,11 @@ export interface BotConfig {
     /** Template for level-up announcements. Placeholders: {user} {username} {level} {server} {role} */
     levelUpMessage: string;
   };
+  /**
+   * One persistent leaderboard message that the bot re-renders on a timer.
+   * Separate from `/leaderboard`, which still renders on demand.
+   */
+  liveLeaderboard: LiveLeaderboardConfig;
   /** Server event logging configuration */
   logging: LoggingConfig;
   verification: {
@@ -281,6 +301,14 @@ const DEFAULT_CONFIG: BotConfig = {
     levelUp: '',
     logs: '',
     levelUpMessage: '🎉 Congratulations {user}, you have reached **level {level}**!',
+  },
+  liveLeaderboard: {
+    enabled: false,
+    channelId: '',
+    messageId: '',
+    intervalMinutes: 10,
+    rows: 25,
+    title: '',
   },
   logging: {
     enabled: true,
@@ -459,6 +487,10 @@ function normalizeConfig(parsed: any): BotConfig {
       ignoreBots: source.xp?.ignoreBots ?? DEFAULT_CONFIG.xp.ignoreBots,
     },
     channels: { ...DEFAULT_CONFIG.channels, ...(source.channels || {}) },
+    liveLeaderboard: {
+      ...DEFAULT_CONFIG.liveLeaderboard,
+      ...(source.liveLeaderboard || {}),
+    },
     logging: {
       ...DEFAULT_CONFIG.logging,
       ...(source.logging || {}),
@@ -571,6 +603,13 @@ function sanitizeConfig(cfg: BotConfig): void {
     cfg.channels.levelUpMessage,
     '🎉 Congratulations {user}, you have reached **level {level}**!',
   );
+
+  cfg.liveLeaderboard.enabled = asBool(cfg.liveLeaderboard.enabled, false);
+  cfg.liveLeaderboard.channelId = asString(cfg.liveLeaderboard.channelId);
+  cfg.liveLeaderboard.messageId = asString(cfg.liveLeaderboard.messageId);
+  cfg.liveLeaderboard.intervalMinutes = asInt(cfg.liveLeaderboard.intervalMinutes, 10, 1, 1440);
+  cfg.liveLeaderboard.rows = asInt(cfg.liveLeaderboard.rows, 25, 3, 25);
+  cfg.liveLeaderboard.title = asString(cfg.liveLeaderboard.title).slice(0, 200);
 
   cfg.logging.enabled = asBool(cfg.logging.enabled, true);
   cfg.logging.channelId = asString(cfg.logging.channelId);

@@ -393,6 +393,9 @@ async function onDocumentClick(event) {
       case 'publish-ticket-panel':
         await publishPanel('ticket', button.dataset.panelId);
         return;
+      case 'publish-live-leaderboard':
+        await runAction('/api/actions/publish-live-leaderboard', {}, 'Leaderboard refreshed.');
+        return;
       case 'add-auto-react':
         addAutoReact();
         return;
@@ -1219,6 +1222,7 @@ function renderOverview() {
 
 function renderXp() {
   const xp = state.config.xp;
+  const live = state.config.liveLeaderboard || {};
   const levelRows = Object.entries(state.config.levelRoles).sort((a, b) => Number(a[0]) - Number(b[0]));
 
   const rows = levelRows.length
@@ -1267,7 +1271,33 @@ function renderXp() {
         <thead><tr><th>Level</th><th>Role granted</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
-      ${addLevel}`, { subtitle: 'Role milestones' })}`;
+      ${addLevel}`, { subtitle: 'Role milestones' })}
+
+    ${card('Self-updating leaderboard', `${toggle(
+      'liveLeaderboard.enabled',
+      live.enabled,
+      'Enable the persistent leaderboard',
+      'One message in one channel, refreshed on a timer.',
+    )}
+      ${grid(
+        [
+          field('Channel', channelSelect('liveLeaderboard.channelId', live.channelId)),
+          field(
+            'Refresh interval (minutes)',
+            numberInput('liveLeaderboard.intervalMinutes', live.intervalMinutes, { min: 1, max: 1440 }),
+          ),
+          field(
+            'Members shown',
+            numberInput('liveLeaderboard.rows', live.rows, { min: 3, max: 25 }),
+            'Top 3 always get the podium image; the rest are grouped into rank zones.',
+          ),
+          field('Title', textInput('liveLeaderboard.title', live.title, { placeholder: '🏆 Server leaderboard' }), 'Leave empty to use the server name.'),
+        ],
+        2,
+      )}
+      <div class="btn-row"><button class="btn small" data-action="publish-live-leaderboard">Publish / refresh now</button><span class="muted tiny">Saves first, then posts or updates the single leaderboard message.</span></div>
+      <span class="hint">This is separate from <code>/leaderboard</code>, which still renders on demand.</span>`,
+      { subtitle: 'One message that updates itself' })}`;
 }
 
 /* ------------------------------------------------------------------ */

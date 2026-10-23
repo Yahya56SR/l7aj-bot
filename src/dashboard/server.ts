@@ -46,6 +46,7 @@ import { buildPanelRows } from '../handlers/buttons';
 import { TICKET_OPEN_PREFIX } from '../handlers/tickets';
 import { GeminiLiveModerator } from '../utils/gemini-live';
 import { welcomeCard } from '../utils/welcomecard';
+import { refreshLiveLeaderboard } from '../utils/liveLeaderboard';
 
 const SESSION_COOKIE = 'talaba_dashboard';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -369,6 +370,27 @@ async function handleRequest(
       const panelId = typeof body.panelId === 'string' ? body.panelId : '';
       const result = await publishTicketPanel(guild, panelId);
       sendJson(res, 200, result);
+      return;
+    }
+
+    case 'POST /api/actions/publish-live-leaderboard': {
+      const result = await refreshLiveLeaderboard(deps.client, { force: true });
+      if (result.status === 'disabled') {
+        throw new HttpError(400, 'Enable the live leaderboard and pick a channel first.');
+      }
+      if (result.status === 'no-channel') {
+        throw new HttpError(400, 'The configured leaderboard channel is missing or not writable.');
+      }
+      if (result.status === 'no-guild') {
+        throw new HttpError(400, 'The bot is not connected to a server yet.');
+      }
+      if (result.status === 'empty') {
+        throw new HttpError(400, 'No XP records yet — nothing to display.');
+      }
+      if (result.status === 'error') {
+        throw new HttpError(502, 'Discord rejected the update. Check the bot permissions in that channel.');
+      }
+      sendJson(res, 200, { ok: true, ...result });
       return;
     }
 

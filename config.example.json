@@ -40,6 +40,15 @@
     "levelUpMessage": "🎉 Congratulations {user}, you have reached **level {level}**!"
   },
 
+  "liveLeaderboard": {
+    "enabled": false,
+    "channelId": "LEADERBOARD_CHANNEL_ID",
+    "messageId": "",
+    "intervalMinutes": 10,
+    "rows": 25,
+    "title": ""
+  },
+
   "logging": {
     "enabled": true,
     "channelId": "",
