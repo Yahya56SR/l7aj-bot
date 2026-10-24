@@ -113,9 +113,8 @@ async function sendReply(
       await message.channel.send({
         content,
         // Keep the reply quiet unless the rule opted into pinging its author.
-        allowedMentions: rule.pingAuthor
-          ? { parse: ['users'], users: [author.id] }
-          : { parse: [] },
+        // `parse` and explicit `users` are mutually exclusive, so ping only the author by id.
+        allowedMentions: rule.pingAuthor ? { users: [author.id] } : { parse: [] },
       });
     }
   } catch (err) {
