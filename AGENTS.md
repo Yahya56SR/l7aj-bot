@@ -41,7 +41,7 @@
 ## AI moderation (Gemini Live)
 - `src/utils/gemini-live.ts` streams via `@google/genai` Live sessions; turn-based, so requests are serialised through a queue. Defaults: 15s timeout, queue 50, recycle socket after 20 turns or 5 minutes.
 - Verified model quirks (header comment): `gemini-3.8-live` closes with code 1007 if you ask for `responseModalities: [TEXT]` — request AUDIO plus `outputAudioTranscription` and read the transcript. `gemini-3.8-live` must NOT receive `thinkingConfig`; the `-extended-thinking` variant requires `thinkingLevel`.
-- Automod order: owner and moderation-permission bypass → ignored channels (skip everything) → bypass roles (skip regex, still AI) → URL/GIF/CAPS → Gemini. AI deletes the message, DMs the author, and alerts staff only at/above `confidenceThreshold`.
+- Automod order: owner and moderation-permission bypass → ignored channels (skip everything) → bypass roles (skip regex, still AI) → URL/GIF/CAPS → Gemini. `automod.aiModeration.bypassRoleIds` is the inverse exemption: those roles skip the AI check but keep the regex filters. AI deletes the message, DMs the author, and alerts staff only at/above `confidenceThreshold`.
 - Fail-open everywhere: timeout, queue overflow, connection loss, or invalid JSON yields `null` → message allowed.
 
 ## L7aj persona

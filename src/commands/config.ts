@@ -160,6 +160,19 @@ export const data = new SlashCommandBuilder()
       )
       .addSubcommand((sub) =>
         sub
+          .setName('ai-bypass')
+          .setDescription('Manage roles that skip AI moderation (regex filters still apply)')
+          .addStringOption((opt) =>
+            opt
+              .setName('action')
+              .setDescription('Add or remove a role')
+              .setRequired(true)
+              .addChoices({ name: 'Add', value: 'add' }, { name: 'Remove', value: 'remove' }),
+          )
+          .addRoleOption((opt) => opt.setName('role').setDescription('Role to add/remove from the AI bypass list').setRequired(true)),
+      )
+      .addSubcommand((sub) =>
+        sub
           .setName('modlogs')
           .setDescription('Set the channel where automod actions are logged')
           .addChannelOption((opt) =>
@@ -592,6 +605,29 @@ async function handleAutomodConfig(interaction: ChatInputCommandInteraction, sub
       await interaction.reply({ content: `✅ Role ${role} ${action === 'add' ? 'added to' : 'removed from'} bypass roles.`, ephemeral: true });
       break;
     }
+    case 'ai-bypass': {
+      const action = interaction.options.getString('action', true);
+      const role = interaction.options.getRole('role', true);
+      updateConfig((c) => {
+        const list = c.automod.aiModeration.bypassRoleIds;
+        if (action === 'add') {
+          if (!list.includes(role.id)) list.push(role.id);
+        } else {
+          const idx = list.indexOf(role.id);
+          if (idx >= 0) list.splice(idx, 1);
+        }
+      });
+      await logConfigChange(
+        interaction,
+        `AI moderation bypass role ${action === 'add' ? 'added' : 'removed'}: ${role}.`,
+        interaction.client as { channels: { cache: Map<string, any> } },
+      ).catch((err) => console.error('[Logging] config change error:', err));
+      await interaction.reply({
+        content: `✅ Role ${role} ${action === 'add' ? 'added to' : 'removed from'} AI moderation bypass roles.`,
+        ephemeral: true,
+      });
+      break;
+    }
     case 'attachment-only': {
       const action = interaction.options.getString('action', true);
       const channel = interaction.options.getChannel('channel', true);
@@ -748,6 +784,7 @@ function formatAutomod(auto: any): string {
     `**Attachment-only channels:** ${auto.attachmentOnlyChannels?.length ? auto.attachmentOnlyChannels.map((id: string) => `<#${id}>`).join(', ') : '(none)'}`,
     `**Mod-logs channel:** ${auto.modLogsChannelId ? `<#${auto.modLogsChannelId}>` : '(none)'}`,
     `**AI moderation:** ${auto.aiModeration?.enabled ? '✅ enabled' : '❌ disabled'} · \`${auto.aiModeration?.model || 'n/a'}\``,
+    `**AI bypass roles:** ${auto.aiModeration?.bypassRoleIds?.length ? auto.aiModeration.bypassRoleIds.map((id: string) => `<@&${id}>`).join(', ') : '(none)'}`,
   ].join('\n');
 }
 

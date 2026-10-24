@@ -1471,7 +1471,8 @@ function renderAutomod() {
   )}">`;
 
   return `<p class="intro">Regex filters catch links, GIFs and shouting. AI moderation is a Gemini Live classifier tuned for
-    Moroccan Darija, Arabizi and French code-switching. AI checks still run for roles that bypass the regex filters.</p>
+    Moroccan Darija, Arabizi and French code-switching. AI checks still run for roles that bypass the regex filters —
+    give a role its own AI bypass below to keep it out of the model too.</p>
 
     ${card('Message filters', `<div class="grid cols-2">
         ${toggle('automod.blockUrls', auto.blockUrls, 'Block URLs', 'Deletes messages containing a link.')}
@@ -1514,6 +1515,11 @@ function renderAutomod() {
         <option value="gemini-3.8-live"></option>
         <option value="gemini-3.8-live-extended-thinking"></option>
       </datalist>
+      <div class="field">
+        <span class="field-label">Bypass roles</span>
+        ${chipList('automod.aiModeration.bypassRoleIds', ai.bypassRoleIds || [], 'role')}
+        <span class="hint">Members with these roles are never sent to the model (regex filters still apply).</span>
+      </div>
       ${field('Flag categories', aiCategories, 'Comma-separated, e.g. insult, hate, harassment, threat, spam, sexual')}
       ${field('System prompt', `<textarea class="input" data-path="automod.aiModeration.systemPrompt" data-type="string" rows="11">${esc(
         ai.systemPrompt,

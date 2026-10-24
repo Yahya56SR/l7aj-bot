@@ -97,7 +97,8 @@
       "thinkingLevel": "low",
       "categories": ["insult", "hate", "harassment", "threat", "spam", "sexual"],
       "minLength": 8,
-      "confidenceThreshold": 0.7
+      "confidenceThreshold": 0.7,
+      "bypassRoleIds": []
     }
   },
 

@@ -44,6 +44,8 @@ export interface AiModerationConfig {
   minLength: number;
   /** Minimum confidence (0-1) required to block a message */
   confidenceThreshold: number;
+  /** Roles that skip AI moderation (still subject to the regex filters) */
+  bypassRoleIds: string[];
 }
 
 export interface AutomodConfig {
@@ -467,6 +469,7 @@ const DEFAULT_CONFIG: BotConfig = {
       categories: ['insult', 'hate', 'harassment', 'threat', 'spam', 'sexual'],
       minLength: 8,
       confidenceThreshold: 0.7,
+      bypassRoleIds: [],
     },
   },
   autoReactions: [],
@@ -769,6 +772,7 @@ function sanitizeConfig(cfg: BotConfig): void {
   ai.thinkingLevel = asString(ai.thinkingLevel, 'low');
   ai.minLength = asInt(ai.minLength, 8, 0, 2_000);
   ai.confidenceThreshold = asNumber(ai.confidenceThreshold, 0.7, 0, 1);
+  ai.bypassRoleIds = asStringArray(ai.bypassRoleIds);
 
   cfg.autoReactions = (Array.isArray(cfg.autoReactions) ? cfg.autoReactions : [])
     .map((entry) => ({

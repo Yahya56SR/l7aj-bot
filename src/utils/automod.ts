@@ -88,10 +88,15 @@ function hasExcessiveCaps(content: string, minLength: number, maxPercent: number
   return percent > maxPercent;
 }
 
+/** Check if the author has any of the given role ids. */
+function hasAnyRole(message: Message, roleIds: string[]): boolean {
+  if (!message.member || !message.guild) return false;
+  return message.member.roles.cache.some((role) => roleIds.includes(role.id));
+}
+
 /** Check if member has any of the bypass roles */
 function hasBypassRoleFn(message: Message, bypassRoles: string[]): boolean {
-  if (!message.member || !message.guild) return false;
-  return message.member.roles.cache.some((role) => bypassRoles.includes(role.id));
+  return hasAnyRole(message, bypassRoles);
 }
 
 /**
@@ -210,6 +215,17 @@ async function runAiModeration(message: Message): Promise<boolean> {
 
   if (!ai.enabled) {
     console.debug('[Automod:AI] Skipped — AI moderation is disabled.');
+    return false;
+  }
+  // Roles in aiModeration.bypassRoleIds skip the model entirely (they are still
+  // subject to the regex filters, unlike automod.bypassRoles which is the
+  // inverse). No delete, no DM, no staff alert for these members.
+  if (ai.bypassRoleIds?.length && hasAnyRole(message, ai.bypassRoleIds)) {
+    console.debug('[Automod:AI] Skipped — member has an AI moderation bypass role.', {
+      messageId: message.id,
+      authorId: message.author.id,
+      bypassRoleIds: ai.bypassRoleIds.length,
+    });
     return false;
   }
   if (!message.content || message.content.length < ai.minLength) {
