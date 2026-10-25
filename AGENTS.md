@@ -25,6 +25,7 @@
 - Commands (`src/commands/`): `rank`, `leaderboard`, `reactionroles`, `roles` (button panels), `levels`, `xp`, `verify`, `config`, `tickets`, `clear`. Events (`src/events/`): `messageCreate` (automod → L7aj persona, fire-and-forget → XP), `voiceStateUpdate`, `messageReaction`, `guildMember`, `logging` (wires ~all guild events to `utils/logger.ts`). Handlers (`src/handlers/`): `registerCommands`, `buttons`, `tickets`, `levelUp`. Utils: `level`, `rankcard`/`rankEmbeds`, `welcomecard`, `automod`, `autoReply`, `gemini-live`, `gemini-persona`, `l7aj`, `l7aj-memory`, `logger`, `fonts`, `discord`. Prompts live in `src/prompts/` (the L7aj character prompt).
 - Interaction routing is manual in `src/index.ts`: modals → `ticket:*` buttons → other buttons (`verify:grant`/`verify:revoke`, `role:toggle:<roleId>`) → autocomplete → slash commands. New component namespaces must be wired there.
 - Log channel resolves to `config.logging.channelId` when set, otherwise `config.channels.logs`. Logging fails open (never blocks core functionality).
+- Every log embed names the actor ("Made by", or "Deleted by"/"Banned by"/"Moved by"/…) plus the audit-log reason. Gateway events carry no actor, so `utils/logger.ts` resolves it from `guild.fetchAuditLogs`, matched by target id, one audit `changes` key (nickname vs timeout share `MemberUpdate`), and a 20s recency window, with a 700ms retry, a 4s per-(guild, action) cache, and silent omission when the entry or the View Audit Log permission is missing.
 - Paths for `config.json`, `data/`, fonts and dashboard assets resolve via `__dirname/..`, so both `tsx src/...` and `dist/` builds work from anywhere. Exception: `welcome.backgroundImage` resolves against `process.cwd()` — run the bot from the repo root.
 - XP: MEE6 math `5*L² + 50*L + 100`; random 15–25/msg with 60s cooldown, 5–8/voice minute, bots ignored by default. Rank cards are PNGs via `@napi-rs/canvas` with a text-embed fallback.
 - Auto-replies (`src/utils/autoReply.ts`, edited in the dashboard's **Auto-replies** section): `config.autoReplies.rules` are checked in order and the first match replies once per message. Bots are always ignored, so replies cannot cascade. Matching is `exact`/`contains`/`startsWith`/`regex` (invalid regex fails closed), empty `channelIds` means every channel, and `cooldownSeconds` is per member per rule. Placeholders: `{user}` `{username}` `{server}` `{channel}` `{message}` `{trigger}`.
@@ -62,7 +63,7 @@
 
 ## Discord requirements
 - Privileged intents (Developer Portal → Bot): **Server Members**, **Message Content**. Presence is unused.
-- Permissions: Manage Roles (must sit above every assigned role or changes fail silently), Send Messages, Read Message History, View Channels. Add Reactions is only used by the L7aj persona's reaction tool.
+- Permissions: Manage Roles (must sit above every assigned role or changes fail silently), Send Messages, Read Message History, View Channels, View Audit Log (needed for "Made by" attribution in logs — without it the field is simply omitted). Add Reactions is only used by the L7aj persona's reaction tool.
 - Login 401 = token reset/revoked or the client secret was used (both look like `xxx.yyy.zzz`). 403 = bot not in the guild.
 
 ## Repo notes

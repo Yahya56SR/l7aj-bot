@@ -16,7 +16,9 @@
  */
 
 import {
+  AuditLogEvent,
   EmbedBuilder,
+  GuildAuditLogsEntry,
   GuildMember,
   Role,
   TextChannel,
@@ -113,6 +115,254 @@ function truncate(value: string, max = 1000): string {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Actor attribution (audit log)                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Who performed an action. Gateway events do not carry the actor, so it is
+ * resolved from the guild audit log. `null` simply means "unknown" (event not
+ * audited, entry not written yet, or the bot lacks View Audit Log) and the
+ * embed then omits the field instead of guessing.
+ */
+export interface LogActor {
+  id: string;
+  bot: boolean;
+  reason: string | null;
+}
+
+/** Gateway events arrive within a second or two of their audit log entry. */
+const ACTOR_MAX_AGE_MS = 20_000;
+/** Short-lived per (guild, event type) cache so bursts do not hammer the API. */
+const ACTOR_CACHE_TTL_MS = 4_000;
+const ACTOR_CACHE_LIMIT = 80;
+/** Delay before re-reading the audit log when the entry has not landed yet. */
+const ACTOR_RETRY_DELAY_MS = 700;
+
+const actorCache = new Map<
+  string,
+  { at: number; entries: GuildAuditLogsEntry[] }
+>();
+/** In-flight fetches, so a burst (e.g. many single deletes) issues one request. */
+const actorPending = new Map<string, Promise<GuildAuditLogsEntry[]>>();
+
+let auditPermissionWarned = false;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Fetch (or reuse) recent audit log entries, optionally filtered by action. */
+async function fetchAuditEntries(
+  guild: Guild,
+  type: AuditLogEvent | null,
+  forceRefresh: boolean,
+): Promise<GuildAuditLogsEntry[]> {
+  const key = `${guild.id}:${type ?? 'all'}`;
+
+  if (!forceRefresh) {
+    const cached = actorCache.get(key);
+    if (cached && Date.now() - cached.at < ACTOR_CACHE_TTL_MS) {
+      return cached.entries;
+    }
+
+    const pending = actorPending.get(key);
+    if (pending) return pending;
+  }
+
+  const request = (async () => {
+    const logs = type
+      ? await guild.fetchAuditLogs({ type, limit: 8 })
+      : await guild.fetchAuditLogs({ limit: 12 });
+    const entries = [...logs.entries.values()];
+
+    // Re-insert so the map is ordered oldest-first for eviction.
+    actorCache.delete(key);
+    actorCache.set(key, { at: Date.now(), entries });
+    while (actorCache.size > ACTOR_CACHE_LIMIT) {
+      const oldest = actorCache.keys().next().value;
+      if (!oldest) break;
+      actorCache.delete(oldest);
+    }
+
+    return entries;
+  })();
+
+  actorPending.set(key, request);
+  try {
+    return await request;
+  } finally {
+    if (actorPending.get(key) === request) actorPending.delete(key);
+  }
+}
+
+/** Options controlling how an actor is looked up in the audit log. */
+interface ActorOptions {
+  retry?: boolean;
+  maxAgeMs?: number;
+  /**
+   * Audit log change keys the entry must contain at least one of. Several
+   * actions share one audit type (e.g. nickname and timeout are both
+   * `MemberUpdate`), so this keeps attribution tied to the right change.
+   */
+  changes?: string[];
+}
+
+/** Does this audit entry record at least one of the expected changes? */
+function matchesChanges(
+  entry: GuildAuditLogsEntry,
+  changes: string[] | undefined,
+): boolean {
+  if (!changes || changes.length === 0) return true;
+  const keys = new Set(
+    (entry.changes ?? []).map((change) => (change as { key?: string }).key),
+  );
+  return changes.some((key) => keys.has(key));
+}
+
+/** Pick the audit entry that best explains an event, if any. */
+function pickEntry(
+  entries: GuildAuditLogsEntry[],
+  targetId: string | undefined,
+  maxAgeMs: number,
+  changes?: string[],
+): GuildAuditLogsEntry | null {
+  const cutoff = Date.now() - maxAgeMs;
+  let fallback: GuildAuditLogsEntry | null = null;
+
+  for (const entry of entries) {
+    if (entry.createdTimestamp < cutoff) continue;
+    if (!matchesChanges(entry, changes)) continue;
+    if (targetId && entry.targetId === targetId) return entry;
+    if (!targetId && !fallback) fallback = entry;
+  }
+
+  return targetId ? null : fallback;
+}
+
+/**
+ * Resolve the actor of an action from the guild audit log.
+ *
+ * Fails open: any API error, missing permission or absent entry resolves to
+ * `null`, which never blocks the log message itself.
+ */
+async function resolveActor(
+  guild: Guild | null | undefined,
+  type: AuditLogEvent,
+  targetId?: string,
+  options: ActorOptions = {},
+): Promise<LogActor | null> {
+  if (!guild) return null;
+  const { retry = true, maxAgeMs = ACTOR_MAX_AGE_MS, changes } = options;
+
+  try {
+    let entry = pickEntry(
+      await fetchAuditEntries(guild, type, false),
+      targetId,
+      maxAgeMs,
+      changes,
+    );
+
+    if (!entry && retry) {
+      // The audit entry can land a moment after the gateway event.
+      await sleep(ACTOR_RETRY_DELAY_MS);
+      entry = pickEntry(
+        await fetchAuditEntries(guild, type, true),
+        targetId,
+        maxAgeMs,
+        changes,
+      );
+    }
+
+    return toActor(entry);
+  } catch (err) {
+    warnOnMissingAuditPermission(err);
+    return null;
+  }
+}
+
+/**
+ * Resolve the actor of an action that Discord may record under one of several
+ * audit log action types (e.g. webhook created/updated/deleted).
+ */
+async function resolveActorOfTypes(
+  guild: Guild | null | undefined,
+  types: AuditLogEvent[],
+  targetId?: string,
+  options: { retry?: boolean; maxAgeMs?: number } = {},
+): Promise<LogActor | null> {
+  if (!guild) return null;
+  const { retry = false, maxAgeMs = ACTOR_MAX_AGE_MS } = options;
+
+  const pick = (entries: GuildAuditLogsEntry[]) =>
+    pickEntry(
+      entries.filter((entry) => types.includes(entry.action)),
+      targetId,
+      maxAgeMs,
+    );
+
+  try {
+    let entry = pick(await fetchAuditEntries(guild, null, false));
+
+    if (!entry && retry) {
+      await sleep(ACTOR_RETRY_DELAY_MS);
+      entry = pick(await fetchAuditEntries(guild, null, true));
+    }
+
+    return toActor(entry);
+  } catch (err) {
+    warnOnMissingAuditPermission(err);
+    return null;
+  }
+}
+
+/** Convert an audit log entry into the actor shape used by the embeds. */
+function toActor(entry: GuildAuditLogsEntry | null): LogActor | null {
+  if (!entry) return null;
+
+  const executorId = entry.executorId ?? entry.executor?.id ?? null;
+  if (!executorId) return null;
+
+  return {
+    id: executorId,
+    bot: !!entry.executor?.bot,
+    reason: entry.reason ?? null,
+  };
+}
+
+/** Warn once when the bot cannot read the audit log (missing permission). */
+function warnOnMissingAuditPermission(err: unknown): void {
+  // 50013 = Missing Permissions (needs the "View Audit Log" permission).
+  if ((err as { code?: number } | null)?.code !== 50013) return;
+  if (auditPermissionWarned) return;
+
+  auditPermissionWarned = true;
+  console.warn(
+    '[Logging] Cannot read the audit log (missing "View Audit Log" permission); log embeds will omit "Made by".',
+  );
+}
+
+/** Append the "who did it" fields (and the audit log reason) to an embed. */
+function addActor(
+  embed: EmbedBuilder,
+  actor: LogActor | null,
+  label = '👤 Made by',
+): EmbedBuilder {
+  if (!actor) return embed;
+
+  embed.addFields({
+    name: label,
+    value: `<@${actor.id}> (\`${actor.id}\`)${actor.bot ? ' • bot' : ''}`,
+    inline: true,
+  });
+
+  if (actor.reason) {
+    embed.addFields({ name: 'Reason', value: truncate(actor.reason, 500) });
+  }
+
+  return embed;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Role events                                                                */
 /* -------------------------------------------------------------------------- */
 
@@ -128,6 +378,10 @@ export async function logRoleCreate(
       { name: 'Mentionable', value: String(role.mentionable), inline: true },
       { name: 'Hoisted', value: String(role.hoist), inline: true },
     );
+  addActor(
+    embed,
+    await resolveActor(role.guild, AuditLogEvent.RoleCreate, role.id),
+  );
   await sendLog(role.guild.id, embed, client, 'roles');
 }
 
@@ -142,6 +396,10 @@ export async function logRoleDelete(
       { name: 'Role ID', value: `\`${role.id}\``, inline: true },
       { name: 'Color', value: role.hexColor ?? 'Default', inline: true },
     );
+  addActor(
+    embed,
+    await resolveActor(role.guild, AuditLogEvent.RoleDelete, role.id),
+  );
   await sendLog(role.guild.id, embed, client, 'roles');
 }
 
@@ -189,6 +447,10 @@ export async function logRoleUpdate(
     });
   }
 
+  addActor(
+    embed,
+    await resolveActor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id),
+  );
   await sendLog(newRole.guild.id, embed, client, 'roles');
 }
 
@@ -220,6 +482,12 @@ export async function logMemberRoleChange(
       { name: 'Member', value: `${member} (\`${member.id}\`)`, inline: true },
       ...fields,
     );
+  addActor(
+    embed,
+    await resolveActor(member.guild, AuditLogEvent.MemberRoleUpdate, member.id, {
+      changes: ['$add', '$remove'],
+    }),
+  );
 
   await sendLog(member.guild.id, embed, client, 'roles');
 }
@@ -246,6 +514,12 @@ export async function logNicknameChange(
         inline: true,
       },
     );
+  addActor(
+    embed,
+    await resolveActor(member.guild, AuditLogEvent.MemberUpdate, member.id, {
+      changes: ['nick'],
+    }),
+  );
 
   await sendLog(member.guild.id, embed, client, 'members');
 }
@@ -278,7 +552,7 @@ export async function logMemberJoin(
   await sendLog(member.guild.id, embed, client, 'members');
 }
 
-/** Log a member leaving. */
+/** Log a member leaving (with the moderator who kicked them, when applicable). */
 export async function logMemberLeave(
   member: GuildMember,
   client: LoggableClient,
@@ -297,6 +571,13 @@ export async function logMemberLeave(
         inline: true,
       },
     );
+  addActor(
+    embed,
+    await resolveActor(member.guild, AuditLogEvent.MemberKick, member.id, {
+      retry: false,
+    }),
+    '👤 Kicked by',
+  );
 
   await sendLog(member.guild.id, embed, client, 'members');
 }
@@ -347,13 +628,19 @@ export async function logMemberTimeout(
         inline: true,
       },
     );
+  addActor(
+    embed,
+    await resolveActor(member.guild, AuditLogEvent.MemberUpdate, member.id, {
+      changes: ['communication_disabled_until'],
+    }),
+  );
 
   await sendLog(member.guild.id, embed, client, 'moderation');
 }
 
 /** Log a member ban. */
 export async function logMemberBan(
-  guild: { id: string; name: string; memberCount: number },
+  guild: Guild,
   user: User,
   client: LoggableClient,
 ): Promise<void> {
@@ -367,13 +654,18 @@ export async function logMemberBan(
         inline: true,
       },
     );
+  addActor(
+    embed,
+    await resolveActor(guild, AuditLogEvent.MemberBanAdd, user.id),
+    '👤 Banned by',
+  );
 
   await sendLog(guild.id, embed, client, 'moderation');
 }
 
 /** Log a member unbanned. */
 export async function logMemberUnban(
-  guild: { id: string; memberCount: number },
+  guild: Guild,
   user: User,
   client: LoggableClient,
 ): Promise<void> {
@@ -387,6 +679,11 @@ export async function logMemberUnban(
         inline: true,
       },
     );
+  addActor(
+    embed,
+    await resolveActor(guild, AuditLogEvent.MemberBanRemove, user.id),
+    '👤 Unbanned by',
+  );
 
   await sendLog(guild.id, embed, client, 'moderation');
 }
@@ -406,6 +703,10 @@ export async function logChannelCreate(
       { name: 'Type', value: String(channel.type), inline: true },
       { name: 'Category', value: channel.parent?.name ?? '(none)', inline: true },
     );
+  addActor(
+    embed,
+    await resolveActor(channel.guild, AuditLogEvent.ChannelCreate, channel.id),
+  );
 
   await sendLog(channel.guild.id, embed, client, 'channels');
 }
@@ -421,6 +722,10 @@ export async function logChannelDelete(
       { name: 'Channel ID', value: `\`${channel.id}\``, inline: true },
       { name: 'Type', value: String(channel.type), inline: true },
     );
+  addActor(
+    embed,
+    await resolveActor(channel.guild, AuditLogEvent.ChannelDelete, channel.id),
+  );
 
   await sendLog(channel.guild.id, embed, client, 'channels');
 }
@@ -445,6 +750,11 @@ export async function logChannelUpdate(
     });
   }
 
+  addActor(
+    embed,
+    await resolveActor(newChannel.guild, AuditLogEvent.ChannelUpdate, newChannel.id),
+  );
+
   await sendLog(newChannel.guild.id, embed, client, 'channels');
 }
 
@@ -467,6 +777,10 @@ export async function logThreadCreate(
         inline: true,
       },
     );
+  addActor(
+    embed,
+    await resolveActor(thread.guild, AuditLogEvent.ThreadCreate, thread.id),
+  );
 
   await sendLog(thread.guild.id, embed, client, 'threads');
 }
@@ -482,6 +796,10 @@ export async function logThreadDelete(
       { name: 'Thread ID', value: `\`${thread.id}\``, inline: true },
       { name: 'Type', value: String(thread.type), inline: true },
     );
+  addActor(
+    embed,
+    await resolveActor(thread.guild, AuditLogEvent.ThreadDelete, thread.id),
+  );
 
   await sendLog(thread.guild.id, embed, client, 'threads');
 }
@@ -519,6 +837,11 @@ export async function logThreadUpdate(
       inline: true,
     });
   }
+
+  addActor(
+    embed,
+    await resolveActor(newThread.guild, AuditLogEvent.ThreadUpdate, newThread.id),
+  );
 
   await sendLog(newThread.guild.id, embed, client, 'threads');
 }
@@ -574,6 +897,14 @@ export async function logStageInstanceCreate(
       { name: 'Topic', value: stageInstance.topic || '(none)', inline: false },
       { name: 'Privacy', value: String(stageInstance.privacyLevel), inline: true },
     );
+  addActor(
+    embed,
+    await resolveActor(
+      stageInstance.guild,
+      AuditLogEvent.StageInstanceCreate,
+      stageInstance.channelId,
+    ),
+  );
 
   await sendLog(stageInstance.guild.id, embed, client, 'stage');
 }
@@ -599,6 +930,15 @@ export async function logStageInstanceUpdate(
     });
   }
 
+  addActor(
+    embed,
+    await resolveActor(
+      newStageInstance.guild,
+      AuditLogEvent.StageInstanceUpdate,
+      newStageInstance.channelId,
+    ),
+  );
+
   await sendLog(newStageInstance.guild.id, embed, client, 'stage');
 }
 
@@ -613,6 +953,14 @@ export async function logStageInstanceDelete(
       { name: 'Channel', value: `${stageInstance.channel} (\`${stageInstance.channelId}\`)`, inline: true },
       { name: 'Topic', value: stageInstance.topic || '(none)', inline: false },
     );
+  addActor(
+    embed,
+    await resolveActor(
+      stageInstance.guild,
+      AuditLogEvent.StageInstanceDelete,
+      stageInstance.channelId,
+    ),
+  );
 
   await sendLog(stageInstance.guild.id, embed, client, 'stage');
 }
@@ -632,6 +980,10 @@ export async function logEmojiCreate(
       { name: 'Name', value: emoji.name, inline: true },
       { name: 'Animated', value: String(emoji.animated), inline: true },
     );
+  addActor(
+    embed,
+    await resolveActor(emoji.guild, AuditLogEvent.EmojiCreate, emoji.id),
+  );
 
   await sendLog(emoji.guild.id, embed, client, 'emojis');
 }
@@ -654,6 +1006,11 @@ export async function logEmojiUpdate(
     });
   }
 
+  addActor(
+    embed,
+    await resolveActor(newEmoji.guild, AuditLogEvent.EmojiUpdate, newEmoji.id),
+  );
+
   await sendLog(newEmoji.guild.id, embed, client, 'emojis');
 }
 
@@ -667,6 +1024,10 @@ export async function logEmojiDelete(
       { name: 'Emoji', value: emoji.name, inline: true },
       { name: 'Emoji ID', value: `\`${emoji.id}\``, inline: true },
     );
+  addActor(
+    embed,
+    await resolveActor(emoji.guild, AuditLogEvent.EmojiDelete, emoji.id),
+  );
 
   await sendLog(emoji.guild.id, embed, client, 'emojis');
 }
@@ -689,6 +1050,14 @@ export async function logWebhookUpdate(
         inline: true,
       },
     );
+  addActor(
+    embed,
+    await resolveActorOfTypes(channel.guild, [
+      AuditLogEvent.WebhookCreate,
+      AuditLogEvent.WebhookUpdate,
+      AuditLogEvent.WebhookDelete,
+    ]),
+  );
 
   await sendLog(channel.guild.id, embed, client, 'webhooks');
 }
@@ -746,6 +1115,11 @@ export async function logMessageDelete(
         value: truncate(message.content || '*no content*'),
       },
     );
+  addActor(
+    embed,
+    await resolveActor(message.guild, AuditLogEvent.MessageDelete, message.id),
+    '👤 Deleted by',
+  );
 
   await sendLog(message.guild.id, embed, client, 'messages');
 }
@@ -782,6 +1156,15 @@ export async function logMessageBulkDelete(
         inline: false,
       },
     );
+  addActor(
+    embed,
+    await resolveActor(
+      channel.guild,
+      AuditLogEvent.MessageBulkDelete,
+      channel.id,
+    ),
+    '👤 Deleted by',
+  );
 
   await sendLog(channel.guild.id, embed, client, 'messages');
 }
@@ -872,6 +1255,28 @@ export async function logVoiceStateUpdate(
     });
   }
 
+  // Only moves/disconnects are audited; self-joins and self-leaves are not.
+  if (moved) {
+    addActor(
+      embed,
+      await resolveActor(member.guild, AuditLogEvent.MemberMove, member.id, {
+        retry: false,
+      }),
+      '👤 Moved by',
+    );
+  } else if (left) {
+    addActor(
+      embed,
+      await resolveActor(
+        member.guild,
+        AuditLogEvent.MemberDisconnect,
+        member.id,
+        { retry: false },
+      ),
+      '👤 Disconnected by',
+    );
+  }
+
   await sendLog(member.guild.id, embed, client, 'voice');
 }
 
@@ -916,6 +1321,11 @@ export async function logGuildUpdate(
       inline: true,
     });
   }
+
+  addActor(
+    embed,
+    await resolveActor(newGuild, AuditLogEvent.GuildUpdate, newGuild.id),
+  );
 
   await sendLog(newGuild.id, embed, client, 'guild');
 }

@@ -210,20 +210,16 @@ export function registerLoggingEvents(client: Client): void {
 
   client.on('guildBanAdd', (guildBan: GuildBan) => {
     const { guild, user } = guildBan;
-    logMemberBan(
-      { id: guild.id, name: guild.name, memberCount: guild.memberCount },
-      user,
-      client as unknown as LoggableClient,
-    ).catch((err) => console.error('[Logging] guildBanAdd error:', err));
+    logMemberBan(guild, user, client as unknown as LoggableClient).catch((err) =>
+      console.error('[Logging] guildBanAdd error:', err),
+    );
   });
 
   client.on('guildBanRemove', (guildBan: GuildBan) => {
     const { guild, user } = guildBan;
-    logMemberUnban(
-      { id: guild.id, memberCount: guild.memberCount },
-      user,
-      client as unknown as LoggableClient,
-    ).catch((err) => console.error('[Logging] guildBanRemove error:', err));
+    logMemberUnban(guild, user, client as unknown as LoggableClient).catch((err) =>
+      console.error('[Logging] guildBanRemove error:', err),
+    );
   });
 
   /* ---------------------------------------------------------------- */
