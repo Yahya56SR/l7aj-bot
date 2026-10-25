@@ -552,12 +552,39 @@ export async function logMemberJoin(
   await sendLog(member.guild.id, embed, client, 'members');
 }
 
-/** Log a member leaving (with the moderator who kicked them, when applicable). */
+/**
+ * Log a member leaving.
+ *
+ * Bans also fire `guildMemberRemove`; those are reported by `logMemberBan`
+ * instead, so this returns early when the removal was a ban. Kicks are renamed
+ * and attributed to the moderator who issued them.
+ */
 export async function logMemberLeave(
   member: GuildMember,
   client: LoggableClient,
 ): Promise<void> {
-  const embed = baseEmbed('📤 Member Left', 0xed4245)
+  const guild = member.guild;
+
+  const bannedBy = await resolveActor(
+    guild,
+    AuditLogEvent.MemberBanAdd,
+    member.id,
+    { retry: false },
+  );
+  // The ban event itself logs the removal (with the moderator).
+  if (bannedBy) return;
+
+  const kickedBy = await resolveActor(
+    guild,
+    AuditLogEvent.MemberKick,
+    member.id,
+    { retry: false },
+  );
+
+  const embed = baseEmbed(
+    kickedBy ? '👢 Member Kicked' : '📤 Member Left',
+    0xed4245,
+  )
     .setDescription(userLine(member.user ?? { id: member.id }))
     .addFields(
       {
@@ -567,19 +594,13 @@ export async function logMemberLeave(
       },
       {
         name: 'Member Count',
-        value: String(member.guild.memberCount),
+        value: String(guild.memberCount),
         inline: true,
       },
     );
-  addActor(
-    embed,
-    await resolveActor(member.guild, AuditLogEvent.MemberKick, member.id, {
-      retry: false,
-    }),
-    '👤 Kicked by',
-  );
+  addActor(embed, kickedBy, '👤 Kicked by');
 
-  await sendLog(member.guild.id, embed, client, 'members');
+  await sendLog(guild.id, embed, client, 'members');
 }
 
 /** Log a member boosting or stopping boosting the server. */

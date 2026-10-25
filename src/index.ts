@@ -55,6 +55,10 @@ client.commands.set(clearCmd.data.name, clearCmd);
 
 // Register server logging event listeners (roles, members, channels, messages)
 registerLoggingEvents(client);
+// Printed at boot so a deploy can be verified from the host console.
+console.log(
+  '[Logging] Log embeds name the acting member (audit log attribution enabled)',
+);
 
 let voiceTickInterval: ReturnType<typeof setInterval> | null = null;
 let ticketSweepInterval: ReturnType<typeof setInterval> | null = null;
