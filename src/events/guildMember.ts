@@ -1,7 +1,9 @@
 import { Client, GuildMember, PartialGuildMember, TextChannel, AttachmentBuilder } from 'discord.js';
 import { getConfig } from '../config';
 import { welcomeCard } from '../utils/welcomecard';
-import { getTotalMemberCount, incrementTotalMembers } from '../db';
+import { getTotalMemberCount, incrementTotalMembers, getUser } from '../db';
+import { levelFromXp } from '../utils/level';
+import { syncLevelRoles } from '../handlers/levelUp';
 
 /**
  * Handle new member joining - send welcome card
@@ -11,6 +13,17 @@ export async function handleGuildMemberAdd(member: GuildMember | PartialGuildMem
     // Track the all-time member count even when welcome messages are disabled,
     // so {memberCount} stays correct if welcome is enabled later.
     const totalMemberCount = incrementTotalMembers();
+
+    // Leaving a server drops every role, so a returning member would otherwise
+    // stay without their level reward until their next level-up.
+    try {
+      const row = getUser(member.id);
+      if (row && row.xp > 0) {
+        await syncLevelRoles(member.guild, member as GuildMember, levelFromXp(row.xp).level);
+      }
+    } catch (err) {
+      console.error('[LevelUp] Failed to restore level roles on join:', err);
+    }
 
     const config = getConfig();
     const welcomeConfig = config.welcome;

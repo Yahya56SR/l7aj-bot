@@ -330,7 +330,7 @@ export interface BotConfig {
   channels: {
     levelUp: string;
     logs: string;
-    /** Template for level-up announcements. Placeholders: {user} {username} {level} {server} {role} */
+    /** Template for level-up announcements. Placeholders: {user} {username} {level} {server} {role} {xp} {xpneeded} */
     levelUpMessage: string;
   };
   /**
@@ -563,6 +563,22 @@ function migratePanels(raw: any): { panels: RolePanel[] } {
   return { panels: [] };
 }
 
+/**
+ * Level reward keys must be plain integers. Hand-edited `config.json` files
+ * bypass the dashboard sanitiser, so normalise them here too — otherwise keys
+ * like `"05"` or `"5.0"` never match a level and the reward is never granted.
+ */
+function normalizeLevelRoles(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const entries: Array<[string, string]> = [];
+  for (const [level, roleId] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^\d+$/.test(level)) continue;
+    if (typeof roleId !== 'string' || roleId.trim() === '') continue;
+    entries.push([String(Number.parseInt(level, 10)), roleId.trim()]);
+  }
+  return Object.fromEntries(entries);
+}
+
 let config: BotConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
 
 /** Marker used by the dashboard instead of real secrets in API responses. */
@@ -587,7 +603,7 @@ function normalizeConfig(parsed: any): BotConfig {
       mappings: { ...(source.reactionRoles?.mappings || {}) },
     },
     roles: migratePanels(source.roles),
-    levelRoles: { ...(source.levelRoles || {}) },
+    levelRoles: normalizeLevelRoles(source.levelRoles),
     xp: {
       perMessageMin: source.xp?.perMessageMin ?? legacyPerMessage ?? DEFAULT_CONFIG.xp.perMessageMin,
       perMessageMax: source.xp?.perMessageMax ?? legacyPerMessage ?? DEFAULT_CONFIG.xp.perMessageMax,

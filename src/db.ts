@@ -209,16 +209,25 @@ export function addXp(userId: string, amount: number, source: string, voiceMinut
   oldLevel: number;
 } {
   const user = ensureUser(userId);
-  const oldLevel = user.level;
-  const newXp = user.xp + amount;
+  // Derived from the XP total rather than trusted from the row: legacy/dashboard
+  // edits can leave `level` out of sync with `xp`, and a stale (too high) level
+  // would swallow every future level-up, so no reward role would ever be given.
+  const baseXp = Number.isFinite(user.xp) ? Math.max(0, Math.floor(user.xp)) : 0;
+  const oldLevel = levelFromXp(baseXp).level;
+  const granted = Number.isFinite(amount) ? Math.max(0, Math.floor(amount)) : 0;
+  const newXp = baseXp + granted;
   const newLevel = levelFromXp(newXp).level;
   const addedMinutes = Number.isFinite(voiceMinutes) ? Math.max(0, Math.floor(voiceMinutes)) : 0;
+  const baseVoiceMinutes = Number.isFinite(user.voice_minutes)
+    ? Math.max(0, user.voice_minutes)
+    : 0;
 
   cache.users[userId] = {
     xp: newXp,
     level: newLevel,
-    last_msg_ts: user.last_msg_ts,
-    voice_minutes: user.voice_minutes + addedMinutes,
+    // Persisted so the message XP cooldown survives a restart.
+    last_msg_ts: source === 'message' ? Date.now() : user.last_msg_ts,
+    voice_minutes: baseVoiceMinutes + addedMinutes,
   };
   save(cache);
 

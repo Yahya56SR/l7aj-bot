@@ -186,10 +186,18 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
     }
     if (xpPerMessage !== null) {
       cfg.xp.perMessageMin = xpPerMessage;
+      // A lone min above the current max would leave an inverted range, which
+      // `randomXp` can only resolve by ignoring the max entirely.
+      if (cfg.xp.perMessageMax < cfg.xp.perMessageMin) {
+        cfg.xp.perMessageMax = cfg.xp.perMessageMin;
+      }
       changes.push(`XP per message → **${xpPerMessage}**`);
     }
     if (xpPerMessageMax !== null) {
       cfg.xp.perMessageMax = xpPerMessageMax;
+      if (cfg.xp.perMessageMin > cfg.xp.perMessageMax) {
+        cfg.xp.perMessageMin = cfg.xp.perMessageMax;
+      }
       changes.push(`Max XP per message → **${xpPerMessageMax}**`);
     }
     if (cooldown !== null) {
@@ -198,10 +206,16 @@ async function setup(interaction: ChatInputCommandInteraction): Promise<void> {
     }
     if (xpPerVoice !== null) {
       cfg.xp.perVoiceMinuteMin = xpPerVoice;
+      if (cfg.xp.perVoiceMinuteMax < cfg.xp.perVoiceMinuteMin) {
+        cfg.xp.perVoiceMinuteMax = cfg.xp.perVoiceMinuteMin;
+      }
       changes.push(`Voice XP per minute → **${xpPerVoice}**`);
     }
     if (xpPerVoiceMax !== null) {
       cfg.xp.perVoiceMinuteMax = xpPerVoiceMax;
+      if (cfg.xp.perVoiceMinuteMin > cfg.xp.perVoiceMinuteMax) {
+        cfg.xp.perVoiceMinuteMin = cfg.xp.perVoiceMinuteMax;
+      }
       changes.push(`Max voice XP per minute → **${xpPerVoiceMax}**`);
     }
     if (ignoreBots !== null) {
@@ -254,6 +268,16 @@ async function roleAdd(interaction: ChatInputCommandInteraction): Promise<void> 
   const level = interaction.options.getInteger('level', true);
   const role = interaction.options.getRole('role', true) as Role;
 
+  // @everyone has no position to compare against, so it would otherwise pass
+  // the hierarchy check and fail at grant time.
+  if (role.id === guild.id) {
+    await interaction.reply({
+      content: 'You cannot use **@everyone** as a level reward — pick a real role.',
+      ephemeral: true,
+    });
+    return;
+  }
+
   const permissionError = canAssignRole(guild, role);
   if (permissionError) {
     await interaction.reply({ content: permissionError, ephemeral: true });
@@ -270,7 +294,7 @@ async function roleAdd(interaction: ChatInputCommandInteraction): Promise<void> 
   await interaction.reply({
     content: `✅ Level **${level}** now grants <@&${role.id}>.${
       previous && previous !== role.id ? `\n(Replaced <@&${previous}>.)` : ''
-    }`,
+    }\nExisting members receive it the next time they level up.`,
     ephemeral: true,
   });
 }

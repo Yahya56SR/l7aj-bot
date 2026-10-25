@@ -1,5 +1,5 @@
 import { Message } from 'discord.js';
-import { addXp, getTicketByChannel, updateTicketActivity } from '../db';
+import { addXp, getUser, getTicketByChannel, updateTicketActivity } from '../db';
 import { getConfig } from '../config';
 import { randomXp } from '../utils/level';
 import { handleLevelUp } from '../handlers/levelUp';
@@ -83,18 +83,15 @@ export async function handleMessageCreate(message: Message): Promise<void> {
 
   const userId = message.author.id;
   const now = Date.now();
-  const expiry = userCooldowns.get(userId);
+  const cooldownMs = Math.max(0, xpCfg.cooldownSeconds) * 1000;
 
-  if (expiry && expiry > now) {
+  // The in-memory map is the fast path. The persisted `last_msg_ts` keeps the
+  // cooldown alive across restarts instead of handing out a free extra grant.
+  const storedExpiry = (getUser(userId)?.last_msg_ts ?? 0) + cooldownMs;
+  const expiry = Math.max(userCooldowns.get(userId) ?? 0, storedExpiry);
+
+  if (expiry > now) {
     return; // Still on cooldown
-  }
-
-  // Set new cooldown expiry
-  userCooldowns.set(userId, now + xpCfg.cooldownSeconds * 1000);
-
-  // Periodically clean up expired entries to prevent memory leak
-  if (userCooldowns.size > 10000) {
-    cleanupCooldowns(now);
   }
 
   const amount = randomXp(xpCfg.perMessageMin, xpCfg.perMessageMax);
@@ -102,6 +99,15 @@ export async function handleMessageCreate(message: Message): Promise<void> {
 
   try {
     const { leveledUp, newLevel, oldLevel } = addXp(userId, amount, 'message');
+
+    // Start the cooldown only once XP was actually awarded, so a failed write
+    // does not silently cost the member their next message.
+    userCooldowns.set(userId, now + cooldownMs);
+
+    // Periodically clean up expired entries to prevent memory leak
+    if (userCooldowns.size > 10000) {
+      cleanupCooldowns(now);
+    }
 
     if (leveledUp) {
       await handleLevelUp(message.guild, message.author, newLevel, oldLevel, message.channel);

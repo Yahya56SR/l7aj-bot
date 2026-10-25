@@ -24,6 +24,10 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return;
   }
 
+  // Defer before any REST work: resolving up to 25 uncached users can exceed
+  // Discord's 3-second acknowledgement window.
+  await interaction.deferReply();
+
   const entries = await Promise.all(
     rows.map(async (row) => {
       let user = interaction.client.users.cache.get(row.user_id);
@@ -44,8 +48,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       };
     }),
   );
-
-  await interaction.deferReply();
 
   try {
     const buffer = await leaderboardCard.generate(

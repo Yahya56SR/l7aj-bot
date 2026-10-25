@@ -40,7 +40,9 @@ export function totalXpForLevel(level: number): number {
 
 /** Break a total XP value into level + progress. */
 export function levelFromXp(totalXp: number): LevelInfo {
-  const total = Math.max(0, Math.floor(totalXp));
+  // A NaN/Infinity XP value (corrupt db row) would otherwise produce
+  // `xpInLevel: NaN` and `xpForNext: NaN` for every embed and rank card.
+  const total = Number.isFinite(totalXp) ? Math.max(0, Math.floor(totalXp)) : 0;
   let level = 0;
   let remaining = total;
 
