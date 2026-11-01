@@ -31,21 +31,31 @@ interface TicketData {
   transcriptUrl?: string;
 }
 
+interface WarnData {
+  id: string;
+  userId: string;
+  moderatorId: string;
+  reason: string;
+  createdAt: number;
+}
+
 interface DbMeta {
   totalMembers: number;
   ticketCounter: number;         // Auto-incrementing ticket number
+  warnCounter: number;           // Auto-incrementing warning number
 }
 
 interface DbData {
   users: { [userId: string]: UserData };
   tickets: { [ticketId: string]: TicketData };
+  warns: { [warnId: string]: WarnData };
   meta: DbMeta;
 }
 
-let cache: DbData = { users: {}, tickets: {}, meta: { totalMembers: 0, ticketCounter: 0 } };
+let cache: ExtendedDbData = emptyExtendedDb();
 
 function emptyDb(): DbData {
-  return { users: {}, tickets: {}, meta: { totalMembers: 0, ticketCounter: 0 } };
+  return { users: {}, tickets: {}, warns: {}, meta: { totalMembers: 0, ticketCounter: 0, warnCounter: 0 } };
 }
 
 function numericOr(value: unknown, fallback: number): number {
@@ -63,6 +73,18 @@ function highestTicketNumber(tickets: { [ticketId: string]: TicketData }): numbe
 }
 
 /**
+ * Highest warning number referenced by an existing `W-<n>` id.
+ */
+function highestWarnNumber(warns: { [warnId: string]: WarnData }): number {
+  let highest = 0;
+  for (const id of Object.keys(warns)) {
+    const match = /^W-(\d+)$/.exec(id);
+    if (match) highest = Math.max(highest, parseInt(match[1], 10));
+  }
+  return highest;
+}
+
+/**
  * Normalise whatever is on disk into the current shape.
  *
  * Handles three historical formats:
@@ -73,8 +95,8 @@ function highestTicketNumber(tickets: { [ticketId: string]: TicketData }): numbe
  * Everything missing is defaulted instead of discarding the file, so a
  * partially-written/older database is never replaced with an empty one.
  */
-function normaliseDb(raw: any): DbData {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return emptyDb();
+function normaliseDb(raw: any): ExtendedDbData {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return emptyExtendedDb();
 
   // Current / intermediate shape: a `users` object.
   if (raw.users && typeof raw.users === 'object' && !Array.isArray(raw.users)) {
@@ -83,14 +105,24 @@ function normaliseDb(raw: any): DbData {
       raw.tickets && typeof raw.tickets === 'object' && !Array.isArray(raw.tickets)
         ? (raw.tickets as { [ticketId: string]: TicketData })
         : {};
+    const warns =
+      raw.warns && typeof raw.warns === 'object' && !Array.isArray(raw.warns)
+        ? (raw.warns as { [warnId: string]: WarnData })
+        : {};
     const meta = raw.meta && typeof raw.meta === 'object' ? raw.meta : {};
 
     return {
+      ...emptyExtendedDb(),
       users,
       tickets,
+      warns,
       meta: {
         totalMembers: numericOr(meta.totalMembers, Object.keys(users).length),
         ticketCounter: numericOr(meta.ticketCounter, highestTicketNumber(tickets)),
+        warnCounter: numericOr(meta.warnCounter, highestWarnNumber(warns)),
+        economyCounter: numericOr(meta.economyCounter, 0),
+        giveawayCounter: numericOr(meta.giveawayCounter, 0),
+        reminderCounter: numericOr(meta.reminderCounter, 0),
       },
     };
   }
@@ -102,13 +134,23 @@ function normaliseDb(raw: any): DbData {
       raw.tickets && typeof raw.tickets === 'object' && !Array.isArray(raw.tickets)
         ? (raw.tickets as { [ticketId: string]: TicketData })
         : {};
+    const warns =
+      raw.warns && typeof raw.warns === 'object' && !Array.isArray(raw.warns)
+        ? (raw.warns as { [warnId: string]: WarnData })
+        : {};
     const meta = raw.meta && typeof raw.meta === 'object' ? raw.meta : {};
     return {
+      ...emptyExtendedDb(),
       users: {},
       tickets,
+      warns,
       meta: {
         totalMembers: numericOr(meta.totalMembers, 0),
         ticketCounter: numericOr(meta.ticketCounter, highestTicketNumber(tickets)),
+        warnCounter: numericOr(meta.warnCounter, highestWarnNumber(warns)),
+        economyCounter: numericOr(meta.economyCounter, 0),
+        giveawayCounter: numericOr(meta.giveawayCounter, 0),
+        reminderCounter: numericOr(meta.reminderCounter, 0),
       },
     };
   }
@@ -124,17 +166,19 @@ function normaliseDb(raw: any): DbData {
 
   if (!looksLikeUsers) {
     console.error('Database file has an unrecognised shape; starting with an empty store.');
-    return emptyDb();
+    return emptyExtendedDb();
   }
 
   return {
+    ...emptyExtendedDb(),
     users: raw as { [userId: string]: UserData },
     tickets: {},
-    meta: { totalMembers: Object.keys(raw).length, ticketCounter: 0 },
+    warns: {},
+    meta: { totalMembers: Object.keys(raw).length, ticketCounter: 0, warnCounter: 0, economyCounter: 0, giveawayCounter: 0, reminderCounter: 0 },
   };
 }
 
-function load(): DbData {
+function load(): ExtendedDbData {
   try {
     if (fs.existsSync(dbPath)) {
       return normaliseDb(JSON.parse(fs.readFileSync(dbPath, 'utf8')));
@@ -142,10 +186,10 @@ function load(): DbData {
   } catch (err) {
     console.error('Failed to load database:', err);
   }
-  return emptyDb();
+  return emptyExtendedDb();
 }
 
-function save(data: DbData): void {
+function save(data: ExtendedDbData): void {
   try {
     fs.writeFileSync(dbPath, JSON.stringify(data, null, 2));
   } catch (err) {
@@ -156,7 +200,7 @@ function save(data: DbData): void {
 
 export function initDb(): void {
   cache = load();
-  console.log(`Database loaded: ${Object.keys(cache.users).length} users, ${Object.keys(cache.tickets).length} tickets, total members tracked: ${cache.meta.totalMembers}`);
+  console.log(`Database loaded: ${Object.keys(cache.users).length} users, ${Object.keys(cache.tickets).length} tickets, ${Object.keys(cache.economy).length} economy records, total members tracked: ${cache.meta.totalMembers}`);
 }
 
 export interface UserRow {
@@ -402,3 +446,569 @@ export function getAllTickets(): TicketRow[] {
 export function getTicketCount(): number {
   return Object.keys(cache.tickets).length;
 }
+
+/* ------------------------------------------------------------------ */
+/* Warning functions                                                  */
+/* ------------------------------------------------------------------ */
+
+export interface WarnRow {
+  id: string;
+  userId: string;
+  moderatorId: string;
+  reason: string;
+  createdAt: number;
+}
+
+export function addWarning(userId: string, moderatorId: string, reason: string): WarnRow {
+  const id = `W-${++cache.meta.warnCounter}`;
+  const warn: WarnData = {
+    id,
+    userId,
+    moderatorId,
+    reason,
+    createdAt: Date.now(),
+  };
+  cache.warns[id] = warn;
+  save(cache);
+  return { id, userId, moderatorId, reason, createdAt: warn.createdAt };
+}
+
+export function getWarnings(userId: string): WarnRow[] {
+  return Object.values(cache.warns)
+    .filter((w) => w.userId === userId)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((w) => ({ id: w.id, userId: w.userId, moderatorId: w.moderatorId, reason: w.reason, createdAt: w.createdAt }));
+}
+
+export function getWarning(warnId: string): WarnRow | undefined {
+  const w = cache.warns[warnId];
+  if (!w) return undefined;
+  return { id: w.id, userId: w.userId, moderatorId: w.moderatorId, reason: w.reason, createdAt: w.createdAt };
+}
+
+export function removeWarning(warnId: string): boolean {
+  if (!cache.warns[warnId]) return false;
+  delete cache.warns[warnId];
+  save(cache);
+  return true;
+}
+
+export function clearWarnings(userId: string): number {
+  let removed = 0;
+  for (const [id, w] of Object.entries(cache.warns)) {
+    if (w.userId === userId) {
+      delete cache.warns[id];
+      removed++;
+    }
+  }
+  if (removed > 0) save(cache);
+  return removed;
+}
+
+export function getWarningCount(): number {
+  return Object.keys(cache.warns).length;
+}
+
+/* ========================================================================== */
+/* Extended schemas (economy, giveaways, reminders, suggestions, AFK, invites,
+   temp voice, starboard, anti-nuke)                                         */
+/* ========================================================================== */
+
+interface EconomyData {
+  balance: number;
+  bank: number;
+  bankLimit: number;
+  dailyStreak: number;
+  lastDaily?: number;
+  lastWork?: number;
+  totalEarned: number;
+  inventory: { [itemId: string]: number };
+}
+
+interface ShopItemData {
+  id: string;
+  name: string;
+  price: number;
+  description: string;
+  roleId?: string;
+  stock?: number; // undefined = unlimited
+}
+
+interface GiveawayData {
+  id: string;
+  channelId: string;
+  messageId: string;
+  prize: string;
+  winnerCount: number;
+  endsAt: number;
+  ended: boolean;
+  createdAt: number;
+  entries: string[]; // user ids who entered
+}
+
+interface ReminderData {
+  id: string;
+  userId: string;
+  channelId: string;
+  message: string;
+  scheduledAt: number;
+  sent: boolean;
+  createdAt: number;
+}
+
+interface SuggestionData {
+  messageId: string;
+  channelId: string;
+  authorId: string;
+  content: string;
+  status: 'open' | 'accepted' | 'rejected' | 'implemented';
+  upvotes: string[];
+  downvotes: string[];
+}
+
+interface AfkData {
+  userId: string;
+  message: string;
+  since: number;
+}
+
+interface InviteData {
+  code: string;
+  inviterId: string;
+  uses: number;
+  reset: boolean;
+}
+
+interface TempVCData {
+  channelId: string;
+  ownerId: string;
+  categoryId: string;
+  createdAt: number;
+}
+
+interface StarboardData {
+  channelId: string;
+  emoji: string;
+  threshold: number;
+}
+
+interface AntiNukeData {
+  enabled: boolean;
+  whitelist: string[]; // user ids exempt
+  actions: { role: boolean; channel: boolean; ban: boolean; kick: boolean };
+  punishment: 'none' | 'kick' | 'ban' | 'timeout';
+}
+
+interface ExtendedMeta {
+  totalMembers: number;
+  ticketCounter: number;
+  warnCounter: number;
+  economyCounter: number;
+  giveawayCounter: number;
+  reminderCounter: number;
+}
+
+interface ExtendedDbData {
+  users: { [userId: string]: UserData };
+  tickets: { [ticketId: string]: TicketData };
+  warns: { [warnId: string]: WarnData };
+  economy: { [userId: string]: EconomyData };
+  shop: { [itemId: string]: ShopItemData };
+  giveaways: { [giveawayId: string]: GiveawayData };
+  reminders: { [reminderId: string]: ReminderData };
+  suggestions: { [messageId: string]: SuggestionData };
+  afk: { [userId: string]: AfkData };
+  invites: { [code: string]: InviteData };
+  tempVC: { [channelId: string]: TempVCData };
+  starboard: StarboardData;
+  antiNuke: AntiNukeData;
+  meta: ExtendedMeta;
+}
+
+function emptyExtendedDb(): ExtendedDbData {
+  return {
+    users: {},
+    tickets: {},
+    warns: {},
+    economy: {},
+    shop: {},
+    giveaways: {},
+    reminders: {},
+    suggestions: {},
+    afk: {},
+    invites: {},
+    tempVC: {},
+    starboard: { channelId: '', emoji: '⭐', threshold: 3 },
+    antiNuke: {
+      enabled: false,
+      whitelist: [],
+      actions: { role: true, channel: true, ban: true, kick: true },
+      punishment: 'none',
+    },
+    meta: {
+      totalMembers: 0,
+      ticketCounter: 0,
+      warnCounter: 0,
+      economyCounter: 0,
+      giveawayCounter: 0,
+      reminderCounter: 0,
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Economy                                                            */
+/* ------------------------------------------------------------------ */
+
+export function getEconomy(userId: string): EconomyData {
+  let data = cache.economy[userId];
+  if (!data) {
+    data = {
+      balance: 0,
+      bank: 0,
+      bankLimit: 1000,
+      dailyStreak: 0,
+      totalEarned: 0,
+      inventory: {},
+    };
+    cache.economy[userId] = data;
+    save(cache);
+  }
+  return data;
+}
+
+export function setEconomy(userId: string, data: EconomyData): void {
+  cache.economy[userId] = data;
+  save(cache);
+}
+
+export function addBalance(userId: string, amount: number): { balance: number } {
+  const data = getEconomy(userId);
+  data.balance = Math.max(0, Math.floor(data.balance + amount));
+  data.totalEarned = Math.max(0, Math.floor(data.totalEarned + Math.max(0, amount)));
+  cache.economy[userId] = data;
+  save(cache);
+  return { balance: data.balance };
+}
+
+export function removeBalance(userId: string, amount: number): { success: boolean; balance: number } {
+  const data = getEconomy(userId);
+  if (data.balance < amount) return { success: false, balance: data.balance };
+  data.balance = Math.floor(data.balance - amount);
+  cache.economy[userId] = data;
+  save(cache);
+  return { success: true, balance: data.balance };
+}
+
+export function addBank(userId: string, amount: number): { bank: number; bankLimit: number } {
+  const data = getEconomy(userId);
+  data.bank = Math.max(0, Math.floor(data.bank + amount));
+  cache.economy[userId] = data;
+  save(cache);
+  return { bank: data.bank, bankLimit: data.bankLimit };
+}
+
+export function addInventoryItem(userId: string, itemId: string, count = 1): void {
+  const data = getEconomy(userId);
+  data.inventory[itemId] = (data.inventory[itemId] || 0) + count;
+  cache.economy[userId] = data;
+  save(cache);
+}
+
+export function removeInventoryItem(userId: string, itemId: string, count = 1): boolean {
+  const data = getEconomy(userId);
+  const current = data.inventory[itemId] || 0;
+  if (current < count) return false;
+  if (current === count) delete data.inventory[itemId];
+  else data.inventory[itemId] = current - count;
+  cache.economy[userId] = data;
+  save(cache);
+  return true;
+}
+
+export function getShopItem(itemId: string): ShopItemData | undefined {
+  return cache.shop[itemId];
+}
+
+export function listShopItems(): ShopItemData[] {
+  return Object.values(cache.shop);
+}
+
+export function addShopItem(item: ShopItemData): void {
+  cache.shop[item.id] = item;
+  save(cache);
+}
+
+export function removeShopItem(itemId: string): boolean {
+  if (!cache.shop[itemId]) return false;
+  delete cache.shop[itemId];
+  save(cache);
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Giveaways                                                          */
+/* ------------------------------------------------------------------ */
+
+export function createGiveaway(giveaway: Omit<GiveawayData, 'id'>): GiveawayData {
+  const id = `G-${++cache.meta.giveawayCounter}`;
+  const data: GiveawayData = { id, ...giveaway, ended: false, entries: [] };
+  cache.giveaways[id] = data;
+  save(cache);
+  return data;
+}
+
+export function getGiveaway(giveawayId: string): GiveawayData | undefined {
+  return cache.giveaways[giveawayId];
+}
+
+export function listGiveaways(onlyOpen = false): GiveawayData[] {
+  return Object.values(cache.giveaways)
+    .filter((g) => !onlyOpen || !g.ended)
+    .sort((a, b) => a.endsAt - b.endsAt);
+}
+
+export function enterGiveaway(giveawayId: string, userId: string): boolean {
+  const g = cache.giveaways[giveawayId];
+  if (!g || g.ended) return false;
+  if (g.entries.includes(userId)) return false;
+  g.entries.push(userId);
+  cache.giveaways[giveawayId] = g;
+  save(cache);
+  return true;
+}
+
+export function endGiveaway(giveawayId: string): string[] | null {
+  const g = cache.giveaways[giveawayId];
+  if (!g || g.ended) return null;
+  g.ended = true;
+  const winners: string[] = [];
+  const pool = [...g.entries];
+  for (let i = 0; i < g.winnerCount && pool.length > 0; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    winners.push(pool.splice(idx, 1)[0]);
+  }
+  cache.giveaways[giveawayId] = g;
+  save(cache);
+  return winners;
+}
+
+export function deleteGiveaway(giveawayId: string): boolean {
+  if (!cache.giveaways[giveawayId]) return false;
+  delete cache.giveaways[giveawayId];
+  save(cache);
+  return true;
+}
+
+export function updateGiveaway(giveawayId: string, updates: Partial<GiveawayData>): boolean {
+  const g = cache.giveaways[giveawayId];
+  if (!g) return false;
+  cache.giveaways[giveawayId] = { ...g, ...updates };
+  save(cache);
+  return true;
+}
+
+export function getGiveawayByMessageId(messageId: string): GiveawayData | undefined {
+  return Object.values(cache.giveaways).find((g) => g.messageId === messageId);
+}
+
+/* ------------------------------------------------------------------ */
+/* Reminders                                                          */
+/* ------------------------------------------------------------------ */
+
+export function createReminder(reminder: Omit<ReminderData, 'id'>): ReminderData {
+  const id = `R-${++cache.meta.reminderCounter}`;
+  const data: ReminderData = { id, ...reminder, sent: false, createdAt: Date.now() };
+  cache.reminders[id] = data;
+  save(cache);
+  return data;
+}
+
+export function getReminder(reminderId: string): ReminderData | undefined {
+  return cache.reminders[reminderId];
+}
+
+export function listReminders(userId: string, onlyUnsent = false): ReminderData[] {
+  return Object.values(cache.reminders)
+    .filter((r) => r.userId === userId && (!onlyUnsent || !r.sent))
+    .sort((a, b) => a.scheduledAt - b.scheduledAt);
+}
+
+export function markReminderSent(reminderId: string): boolean {
+  const r = cache.reminders[reminderId];
+  if (!r) return false;
+  r.sent = true;
+  cache.reminders[reminderId] = r;
+  save(cache);
+  return true;
+}
+
+export function deleteReminder(reminderId: string): boolean {
+  if (!cache.reminders[reminderId]) return false;
+  delete cache.reminders[reminderId];
+  save(cache);
+  return true;
+}
+
+export function getDueReminders(now = Date.now()): ReminderData[] {
+  return Object.values(cache.reminders).filter((r) => !r.sent && r.scheduledAt <= now);
+}
+
+/* ------------------------------------------------------------------ */
+/* Suggestions                                                        */
+/* ------------------------------------------------------------------ */
+
+export function setSuggestion(data: SuggestionData): void {
+  cache.suggestions[data.messageId] = data;
+  save(cache);
+}
+
+export function getSuggestion(messageId: string): SuggestionData | undefined {
+  return cache.suggestions[messageId];
+}
+
+export function listSuggestions(status?: string): SuggestionData[] {
+  return Object.values(cache.suggestions)
+    .filter((s) => !status || s.status === status)
+    .sort((a, b) => b.upvotes.length - a.upvotes.length);
+}
+
+export function updateSuggestionStatus(messageId: string, status: string): boolean {
+  const s = cache.suggestions[messageId];
+  if (!s) return false;
+  s.status = status as SuggestionData['status'];
+  cache.suggestions[messageId] = s;
+  save(cache);
+  return true;
+}
+
+export function updateSuggestionVotes(
+  messageId: string,
+  userId: string,
+  vote: 'up' | 'down',
+): { up: number; down: number } | null {
+  const s = cache.suggestions[messageId];
+  if (!s) return null;
+  s.upvotes = s.upvotes.filter((id) => id !== userId);
+  s.downvotes = s.downvotes.filter((id) => id !== userId);
+  if (vote === 'up') s.upvotes.push(userId);
+  else s.downvotes.push(userId);
+  cache.suggestions[messageId] = s;
+  save(cache);
+  return { up: s.upvotes.length, down: s.downvotes.length };
+}
+
+export function removeSuggestionVote(messageId: string, userId: string): boolean {
+  const s = cache.suggestions[messageId];
+  if (!s) return false;
+  s.upvotes = s.upvotes.filter((id) => id !== userId);
+  s.downvotes = s.downvotes.filter((id) => id !== userId);
+  cache.suggestions[messageId] = s;
+  save(cache);
+  return true;
+}
+
+export function deleteSuggestion(messageId: string): boolean {
+  if (!cache.suggestions[messageId]) return false;
+  delete cache.suggestions[messageId];
+  save(cache);
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* AFK                                                                */
+/* ------------------------------------------------------------------ */
+
+export function setAfk(userId: string, message: string): void {
+  cache.afk[userId] = { userId, message, since: Date.now() };
+  save(cache);
+}
+
+export function getAfk(userId: string): AfkData | undefined {
+  return cache.afk[userId];
+}
+
+export function removeAfk(userId: string): boolean {
+  if (!cache.afk[userId]) return false;
+  delete cache.afk[userId];
+  save(cache);
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Invites                                                            */
+/* ------------------------------------------------------------------ */
+
+export function setInvite(data: InviteData): void {
+  cache.invites[data.code] = data;
+  save(cache);
+}
+
+export function getInvite(code: string): InviteData | undefined {
+  return cache.invites[code];
+}
+
+export function listInvites(): InviteData[] {
+  return Object.values(cache.invites);
+}
+
+export function deleteInvite(code: string): boolean {
+  if (!cache.invites[code]) return false;
+  delete cache.invites[code];
+  save(cache);
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Temporary voice channels                                           */
+/* ------------------------------------------------------------------ */
+
+export function setTempVC(data: TempVCData): void {
+  cache.tempVC[data.channelId] = data;
+  save(cache);
+}
+
+export function getTempVC(channelId: string): TempVCData | undefined {
+  return cache.tempVC[channelId];
+}
+
+export function listTempVC(): TempVCData[] {
+  return Object.values(cache.tempVC);
+}
+
+export function deleteTempVC(channelId: string): boolean {
+  if (!cache.tempVC[channelId]) return false;
+  delete cache.tempVC[channelId];
+  save(cache);
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Starboard                                                          */
+/* ------------------------------------------------------------------ */
+
+export function getStarboard(): StarboardData {
+  return cache.starboard;
+}
+
+export function setStarboard(data: Partial<StarboardData>): void {
+  cache.starboard = { ...cache.starboard, ...data };
+  save(cache);
+}
+
+/* ------------------------------------------------------------------ */
+/* Anti-nuke                                                          */
+/* ------------------------------------------------------------------ */
+
+export function getAntiNuke(): AntiNukeData {
+  return cache.antiNuke;
+}
+
+export function setAntiNuke(data: Partial<AntiNukeData>): void {
+  cache.antiNuke = { ...cache.antiNuke, ...data };
+  save(cache);
+}
+
+/* ------------------------------------------------------------------ */
+/* Legacy migration handled inline by normaliseDb                     */
+/* ------------------------------------------------------------------ */

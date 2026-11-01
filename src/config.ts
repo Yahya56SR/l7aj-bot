@@ -265,6 +265,77 @@ export interface TicketConfig {
   logChannelId: string;
 }
 
+/** Economy: daily, work, pay, shop and balances */
+export interface EconomyConfig {
+  /** Master switch for the economy system */
+  enabled: boolean;
+  /** Coins granted by the daily reward */
+  dailyAmount: number;
+  /** Minimum coins earned per work action */
+  workMin: number;
+  /** Maximum coins earned per work action */
+  workMax: number;
+  /** Maximum coins that can be stored in the bank */
+  bankLimit: number;
+}
+
+/** Suggestions channel and toggle */
+export interface SuggestConfig {
+  /** Master switch for suggestions */
+  enabled: boolean;
+  /** Channel where suggestions are posted */
+  channelId: string;
+}
+
+/** Starboard channel, emoji and threshold */
+export interface StarboardConfig {
+  /** Channel where starred messages are reposted */
+  channelId: string;
+  /** Emoji used to star a message */
+  emoji: string;
+  /** Number of stars required to post to the starboard */
+  threshold: number;
+}
+
+/** AFK status toggle */
+export interface AfkConfig {
+  /** Master switch for AFK */
+  enabled: boolean;
+}
+
+/** Invite tracking toggle */
+export interface InvitesConfig {
+  /** Master switch for invite tracking */
+  enabled: boolean;
+}
+
+/** Join-to-create temporary voice channels */
+export interface TempVcConfig {
+  /** Master switch for temp voice channels */
+  enabled: boolean;
+  /** Voice channel members join to create a temp VC */
+  createChannelId: string;
+  /** Category where temp VCs are created */
+  categoryId: string;
+}
+
+/** Anti-nuke role/channel/ban/kick protection */
+export interface AntiNukeConfig {
+  /** Master switch for anti-nuke */
+  enabled: boolean;
+  /** Punishment for detected nuke actions: none, kick, ban, timeout */
+  punishment: 'none' | 'kick' | 'ban' | 'timeout';
+  /** User IDs exempt from anti-nuke enforcement */
+  whitelist: string[];
+  /** Which actions are protected */
+  actions: {
+    role: boolean;
+    channel: boolean;
+    ban: boolean;
+    kick: boolean;
+  };
+}
+
 export interface LoggingCategoryConfig {
   roles: boolean;
   members: boolean;
@@ -375,6 +446,20 @@ export interface BotConfig {
   goodbye: GoodbyeConfig;
   /** Ticket system configuration */
   tickets: TicketConfig;
+  /** Economy: daily, work, pay, shop and balances */
+  economy: EconomyConfig;
+  /** Suggestions channel and toggle */
+  suggest: SuggestConfig;
+  /** Starboard channel, emoji and threshold */
+  starboard: StarboardConfig;
+  /** AFK status toggle */
+  afk: AfkConfig;
+  /** Invite tracking toggle */
+  invites: InvitesConfig;
+  /** Join-to-create temporary voice channels */
+  tempvc: TempVcConfig;
+  /** Anti-nuke role/channel/ban/kick protection */
+  antinuke: AntiNukeConfig;
 }
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -531,6 +616,44 @@ const DEFAULT_CONFIG: BotConfig = {
     panels: [],
     logChannelId: '',
   },
+  economy: {
+    enabled: false,
+    dailyAmount: 100,
+    workMin: 20,
+    workMax: 80,
+    bankLimit: 1000,
+  },
+  suggest: {
+    enabled: false,
+    channelId: '',
+  },
+  starboard: {
+    channelId: '',
+    emoji: '⭐',
+    threshold: 3,
+  },
+  afk: {
+    enabled: false,
+  },
+  invites: {
+    enabled: false,
+  },
+  tempvc: {
+    enabled: false,
+    createChannelId: '',
+    categoryId: '',
+  },
+  antinuke: {
+    enabled: false,
+    punishment: 'none',
+    whitelist: [],
+    actions: {
+      role: true,
+      channel: true,
+      ban: true,
+      kick: true,
+    },
+  },
 };
 
 const configPath = path.join(__dirname, '..', 'config.json');
@@ -673,6 +796,38 @@ function normalizeConfig(parsed: any): BotConfig {
       ...DEFAULT_CONFIG.tickets,
       ...(source.tickets || {}),
       panels: Array.isArray(source.tickets?.panels) ? source.tickets.panels : [],
+    },
+    economy: {
+      ...DEFAULT_CONFIG.economy,
+      ...(source.economy || {}),
+    },
+    suggest: {
+      ...DEFAULT_CONFIG.suggest,
+      ...(source.suggest || {}),
+    },
+    starboard: {
+      ...DEFAULT_CONFIG.starboard,
+      ...(source.starboard || {}),
+    },
+    afk: {
+      ...DEFAULT_CONFIG.afk,
+      ...(source.afk || {}),
+    },
+    invites: {
+      ...DEFAULT_CONFIG.invites,
+      ...(source.invites || {}),
+    },
+    tempvc: {
+      ...DEFAULT_CONFIG.tempvc,
+      ...(source.tempvc || {}),
+    },
+    antinuke: {
+      ...DEFAULT_CONFIG.antinuke,
+      ...(source.antinuke || {}),
+      actions: {
+        ...DEFAULT_CONFIG.antinuke.actions,
+        ...(source.antinuke?.actions || {}),
+      },
     },
   };
 }
@@ -936,6 +1091,38 @@ function sanitizeConfig(cfg: BotConfig): void {
       };
     }),
   }));
+
+  cfg.economy.enabled = asBool(cfg.economy.enabled, false);
+  cfg.economy.dailyAmount = asInt(cfg.economy.dailyAmount, 100, 0, 10000);
+  cfg.economy.workMin = asInt(cfg.economy.workMin, 20, 0, 10000);
+  cfg.economy.workMax = asInt(cfg.economy.workMax, 80, 0, 10000);
+  cfg.economy.bankLimit = asInt(cfg.economy.bankLimit, 1000, 0, 100000);
+
+  cfg.suggest.enabled = asBool(cfg.suggest.enabled, false);
+  cfg.suggest.channelId = asString(cfg.suggest.channelId);
+
+  cfg.starboard.channelId = asString(cfg.starboard.channelId);
+  cfg.starboard.emoji = asString(cfg.starboard.emoji, '⭐').slice(0, 50);
+  cfg.starboard.threshold = asInt(cfg.starboard.threshold, 3, 1, 50);
+
+  cfg.afk.enabled = asBool(cfg.afk.enabled, false);
+
+  cfg.invites.enabled = asBool(cfg.invites.enabled, false);
+
+  cfg.tempvc.enabled = asBool(cfg.tempvc.enabled, false);
+  cfg.tempvc.createChannelId = asString(cfg.tempvc.createChannelId);
+  cfg.tempvc.categoryId = asString(cfg.tempvc.categoryId);
+
+  cfg.antinuke.enabled = asBool(cfg.antinuke.enabled, false);
+  cfg.antinuke.punishment = asString(cfg.antinuke.punishment, 'none') as 'none' | 'kick' | 'ban' | 'timeout';
+  if (!['none', 'kick', 'ban', 'timeout'].includes(cfg.antinuke.punishment)) {
+    cfg.antinuke.punishment = 'none';
+  }
+  cfg.antinuke.whitelist = asStringArray(cfg.antinuke.whitelist);
+  cfg.antinuke.actions.role = asBool(cfg.antinuke.actions.role, true);
+  cfg.antinuke.actions.channel = asBool(cfg.antinuke.actions.channel, true);
+  cfg.antinuke.actions.ban = asBool(cfg.antinuke.actions.ban, true);
+  cfg.antinuke.actions.kick = asBool(cfg.antinuke.actions.kick, true);
 }
 
 /**

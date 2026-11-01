@@ -1387,3 +1387,77 @@ export async function logConfigChange(
 
   await sendLog(interaction.guild.id, embed, client, 'config');
 }
+
+/* -------------------------------------------------------------------------- */
+/* Moderation command actions                                                 */
+/* -------------------------------------------------------------------------- */
+
+/** Log a member being warned by a moderator. */
+export async function logMemberWarn(
+  guild: Guild,
+  user: { id: string; username: string; tag?: string },
+  moderator: { id: string; username: string },
+  reason: string,
+  warnId: string,
+  client: LoggableClient,
+): Promise<void> {
+  const embed = baseEmbed('⚠️ Member Warned', 0xfeca57)
+    .setDescription(`<@${user.id}> (\`${user.id}\`)`)
+    .addFields(
+      { name: 'Reason', value: truncate(reason, 1000), inline: false },
+      { name: 'Warning ID', value: `\`${warnId}\``, inline: true },
+      { name: 'Moderator', value: `<@${moderator.id}> (\`${moderator.id}\`)`, inline: true },
+    );
+  await sendLog(guild.id, embed, client, 'moderation');
+}
+
+/** Log a channel slowmode change. */
+export async function logChannelSlowmode(
+  channel: { id: string; name: string; guild: { id: string } },
+  moderator: { id: string; username: string },
+  seconds: number,
+  client: LoggableClient,
+): Promise<void> {
+  const embed = baseEmbed(
+    seconds > 0 ? '🐢 Slowmode Enabled' : '🐇 Slowmode Disabled',
+    seconds > 0 ? 0xfeca57 : 0x57f287,
+  )
+    .setDescription(`${channel.name} (\`${channel.id}\`)`)
+    .addFields(
+      { name: 'Slowmode', value: `${seconds} second(s)`, inline: true },
+      { name: 'Moderator', value: `<@${moderator.id}> (\`${moderator.id}\`)`, inline: true },
+    );
+  await sendLog(channel.guild.id, embed, client, 'channels');
+}
+
+/** Log a channel being locked. */
+export async function logChannelLock(
+  channel: { id: string; name: string; guild: { id: string } },
+  moderator: { id: string; username: string },
+  reason: string | null,
+  client: LoggableClient,
+): Promise<void> {
+  const embed = baseEmbed('🔒 Channel Locked', 0xed4245)
+    .setDescription(`${channel.name} (\`${channel.id}\`)`)
+    .addFields(
+      { name: 'Reason', value: truncate(reason ?? '(none)', 1000), inline: false },
+      { name: 'Moderator', value: `<@${moderator.id}> (\`${moderator.id}\`)`, inline: true },
+    );
+  await sendLog(channel.guild.id, embed, client, 'channels');
+}
+
+/** Log a channel being unlocked. */
+export async function logChannelUnlock(
+  channel: { id: string; name: string; guild: { id: string } },
+  moderator: { id: string; username: string },
+  reason: string | null,
+  client: LoggableClient,
+): Promise<void> {
+  const embed = baseEmbed('🔓 Channel Unlocked', 0x57f287)
+    .setDescription(`${channel.name} (\`${channel.id}\`)`)
+    .addFields(
+      { name: 'Reason', value: truncate(reason ?? '(none)', 1000), inline: false },
+      { name: 'Moderator', value: `<@${moderator.id}> (\`${moderator.id}\`)`, inline: true },
+    );
+  await sendLog(channel.guild.id, embed, client, 'channels');
+}

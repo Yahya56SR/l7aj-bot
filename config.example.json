@@ -176,5 +176,43 @@
     "defaultPingRoles": [],
     "panels": [],
     "logChannelId": "TICKET_LOG_CHANNEL_ID_HERE"
+  },
+  "economy": {
+    "enabled": false,
+    "dailyAmount": 100,
+    "workMin": 20,
+    "workMax": 80,
+    "bankLimit": 1000
+  },
+  "suggest": {
+    "enabled": false,
+    "channelId": "SUGGESTION_CHANNEL_ID_HERE"
+  },
+  "starboard": {
+    "channelId": "STARBOARD_CHANNEL_ID_HERE",
+    "emoji": "⭐",
+    "threshold": 3
+  },
+  "afk": {
+    "enabled": false
+  },
+  "invites": {
+    "enabled": false
+  },
+  "tempvc": {
+    "enabled": false,
+    "createChannelId": "CREATE_TEMPVC_CHANNEL_ID_HERE",
+    "categoryId": "TEMPVC_CATEGORY_ID_HERE"
+  },
+  "antinuke": {
+    "enabled": false,
+    "punishment": "none",
+    "whitelist": [],
+    "actions": {
+      "role": true,
+      "channel": true,
+      "ban": true,
+      "kick": true
+    }
   }
 }

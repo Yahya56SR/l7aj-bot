@@ -84,6 +84,12 @@ const ICONS = {
   bot: '<rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M8.5 13h.01M15.5 13h.01M9.5 17h5"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   link: '<path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.2-1.2"/>',
+  coins: '<circle cx="12" cy="12" r="10"/><path d="M11.5 7.5h1M11.5 12.5h1M11.5 17.5h1M16.5 7.5h1M16.5 12.5h1M16.5 17.5h1M7.5 7.5h1M7.5 12.5h1M7.5 17.5h1"/><circle cx="5.5" cy="5.5" r="1"/><circle cx="18.5" cy="18.5" r="1"/>',
+  present: '<rect x="2" y="7" width="20" height="10" rx="2" ry="2"/><path d="M12 7v13M12 7V3M12 20V13M2 12h20M22 12H2"/>',
+  vote: '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="12" y1="9" x2="12" y1="21"/><path d="M19 17l-2-2-2 2M5 17l2-2 2 2"/>',
+  star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  megaphone: '<path d="M11 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2"/><path d="M16 11c1.67 0 3 1.33 3 3v3"/><line x1="12" y1="13" x2="22" y2="13"/><line x1="12" y1="7" x2="22" y2="7"/>',
 };
 
 function icon(name) {
@@ -103,6 +109,13 @@ const sections = [
   { id: 'roles', label: 'Role Panels', icon: 'roles', group: 'Community', subtitle: 'Button panels, reaction roles and verification', render: renderRoles },
   { id: 'tickets', label: 'Tickets', icon: 'tickets', group: 'Community', subtitle: 'Panels, forms, staff roles and auto-close', render: renderTickets },
   { id: 'automod', label: 'AutoMod & AI', icon: 'shield', group: 'Protection', subtitle: 'Filters, exemptions and Gemini moderation', render: renderAutomod },
+  { id: 'economy', label: 'Economy', icon: 'coins', group: 'Community', subtitle: 'Daily rewards, work, pay, shop and balances', render: renderEconomy },
+  { id: 'suggest', label: 'Suggestions', icon: 'vote', group: 'Community', subtitle: 'Suggestion channel and voting', render: renderSuggest },
+  { id: 'starboard', label: 'Starboard', icon: 'star', group: 'Community', subtitle: 'Starred messages reposted to a channel', render: renderStarboard },
+  { id: 'afk', label: 'AFK', icon: 'clock', group: 'Community', subtitle: 'Away-from-keyboard status', render: renderAfk },
+  { id: 'invites', label: 'Invites', icon: 'link', group: 'Community', subtitle: 'Track who invited whom', render: renderInvites },
+  { id: 'tempvc', label: 'Temp Voice', icon: 'present', group: 'Community', subtitle: 'Join-to-create temporary voice channels', render: renderTempVc },
+  { id: 'antinuke', label: 'Anti-Nuke', icon: 'megaphone', group: 'Protection', subtitle: 'Role, channel, ban and kick protection', render: renderAntiNuke },
   { id: 'advanced', label: 'Advanced', icon: 'advanced', group: 'System', subtitle: 'Secrets, raw JSON and environment', render: renderAdvanced },
 ];
 
@@ -2022,10 +2035,145 @@ function renderStats() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Render: economy                                                    */
+/* ------------------------------------------------------------------ */
+
+function renderEconomy() {
+  const cfg = state.config;
+  const eco = cfg.economy || {};
+
+  return `<p class="intro">Members earn coins from daily rewards and work, can pay each other, and buy items from the server shop.
+    Balances and the shop live in <code>data/talaba.json</code>.</p>
+
+    ${card('Economy engine', `${toggle('economy.enabled', eco.enabled, 'Enable economy', 'While this is off, no economy commands run.')}
+      ${grid([
+        field('Daily reward amount', numberInput('economy.dailyAmount', eco.dailyAmount, { min: 0, max: 10000 })),
+        field('Bank limit', numberInput('economy.bankLimit', eco.bankLimit, { min: 0, max: 100000 }), 'Maximum coins storable in the bank.'),
+        field('Work minimum', numberInput('economy.workMin', eco.workMin, { min: 0, max: 10000 })),
+        field('Work maximum', numberInput('economy.workMax', eco.workMax, { min: 0, max: 10000 })),
+      ], 2)}, { subtitle: '/economy balance, daily, work, pay, shop, buy, inventory' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: suggestions                                                */
+/* ------------------------------------------------------------------ */
+
+function renderSuggest() {
+  const cfg = state.config;
+  const sug = cfg.suggest || {};
+
+  return `<p class="intro">Members submit suggestions with <code>/suggest submit</code>. Each suggestion is posted as a message
+    (or a forum thread) with 👍 / 👎 voting. Admins set the status with <code>/suggest status</code>.</p>
+
+    ${card('Suggestions', `${toggle('suggest.enabled', sug.enabled, 'Enable suggestions', 'While this is off, no new suggestions can be submitted.')}
+      ${grid([field('Channel', channelSelect('suggest.channelId', sug.channelId))], 1)}, { subtitle: 'Where suggestions are posted' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: starboard                                                  */
+/* ------------------------------------------------------------------ */
+
+function renderStarboard() {
+  const cfg = state.config;
+  const sb = cfg.starboard || {};
+
+  return `<p class="intro">When a message reaches the star threshold with the configured emoji, it is reposted to the starboard
+    channel. Configured here and with <code>/starboard</code>.</p>
+
+    ${card('Starboard', `${grid([
+      field('Channel', channelSelect('starboard.channelId', sb.channelId)),
+      field('Emoji', textInput('starboard.emoji', sb.emoji, { maxlength: 50, placeholder: '⭐' })),
+      field('Threshold', numberInput('starboard.threshold', sb.threshold, { min: 1, max: 50 }), 'Number of star reactions required.'),
+    ], 3)}, { subtitle: 'Star emoji, threshold and destination channel' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: AFK                                                        */
+/* ------------------------------------------------------------------ */
+
+function renderAfk() {
+  const cfg = state.config;
+  const afk = cfg.afk || {};
+
+  return `<p class="intro">Members go AFK with <code>/afk</code>. When someone mentions an AFK user, the bot replies with their
+    AFK message. AFK clears automatically when the member sends a message.</p>
+
+    ${card('AFK', `${toggle('afk.enabled', afk.enabled, 'Enable AFK', 'While this is off, AFK statuses are not tracked.')}`, {
+      subtitle: '/afk [message]',
+    })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: invites                                                    */
+/* ------------------------------------------------------------------ */
+
+function renderInvites() {
+  const cfg = state.config;
+  const inv = cfg.invites || {};
+
+  return `<p class="intro">The bot tracks which invite code each member used to join and rewards the inviter with economy coins.
+    View stats with <code>/invites check</code> and <code>/invites leaderboard</code>.</p>
+
+    ${card('Invite tracking', `${toggle('invites.enabled', inv.enabled, 'Enable invite tracking', 'While this is off, join source is not recorded.')}`, {
+      subtitle: 'Invite codes are cached on startup and tracked on member join.',
+    })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: temporary voice                                            */
+/* ------------------------------------------------------------------ */
+
+function renderTempVc() {
+  const cfg = state.config;
+  const vc = cfg.tempvc || {};
+
+  return `<p class="intro">When a member joins the configured voice channel, the bot creates a private voice channel for them in the
+    configured category. The owner can rename it, set a user limit, kick members, and the channel deletes when empty.</p>
+
+    ${card('Temporary voice channels', `${toggle('tempvc.enabled', vc.enabled, 'Enable temp voice', 'While this is off, join-to-create is inactive.')}
+      ${grid([
+        field('Create channel', channelSelect('tempvc.createChannelId', vc.createChannelId), 'Members join this channel to spawn a temp VC.'),
+        field('Category', categorySelect('tempvc.categoryId', vc.categoryId), 'New temp VCs are created here.'),
+      ], 2)}, { subtitle: '/tempvc setup, limit, name, kick, config' })}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: anti-nuke                                                  */
+/* ------------------------------------------------------------------ */
+
+function renderAntiNuke() {
+  const cfg = state.config;
+  const an = cfg.antinuke || {};
+
+  return `<p class="intro">Anti-nuke watches the audit log for role, channel, ban and kick events. When a non-whitelisted user performs
+    a protected action, the bot can kick, ban, timeout or log only. Configured here and with <code>/antinuke</code>.</p>
+
+    ${card('Anti-nuke engine', `${toggle('antinuke.enabled', an.enabled, 'Enable anti-nuke', 'While this is off, no enforcement runs.')}
+      ${grid([
+        field('Punishment', select('antinuke.punishment', an.punishment, [
+          { value: 'none', label: 'None (log only)' },
+          { value: 'kick', label: 'Kick' },
+          { value: 'ban', label: 'Ban' },
+          { value: 'timeout', label: 'Timeout (1h)' },
+        ])),
+      ], 1)}
+      <div class="field">
+        <span class="field-label">Whitelisted users</span>
+        ${chipList('antinuke.whitelist', an.whitelist || [], 'role')}
+        <span class="hint">Comma-separated user IDs exempt from anti-nuke enforcement.</span>
+      </div>
+      <div class="grid cols-2">
+        ${toggle('antinuke.actions.role', an.actions.role, 'Protect roles', 'Role create/delete.')}
+        ${toggle('antinuke.actions.channel', an.actions.channel, 'Protect channels', 'Channel create/delete.')}
+        ${toggle('antinuke.actions.ban', an.actions.ban, 'Protect bans', 'Member bans.')}
+        ${toggle('antinuke.actions.kick', an.actions.kick, 'Protect kicks', 'Member kicks.')}
+      </div>`, { subtitle: 'Punishment and protected action types' })}`;
+}
+
+/* ------------------------------------------------------------------ */
 /* Render: advanced                                                    */
 /* ------------------------------------------------------------------ */
 
-function renderAdvanced() {
   const meta = state.meta || {};
   const tokenPill = `<span class="pill ${meta.tokenConfigured ? 'ok' : 'bad'}">${meta.tokenConfigured ? 'Configured' : 'Missing'}</span>`;
   const keyPill = `<span class="pill ${meta.geminiKeyConfigured ? 'ok' : 'bad'}">${meta.geminiKeyConfigured ? 'Configured' : 'Missing'}</span>`;
