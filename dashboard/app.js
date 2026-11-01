@@ -2174,6 +2174,7 @@ function renderAntiNuke() {
 /* Render: advanced                                                    */
 /* ------------------------------------------------------------------ */
 
+function renderAdvanced() {
   const meta = state.meta || {};
   const tokenPill = `<span class="pill ${meta.tokenConfigured ? 'ok' : 'bad'}">${meta.tokenConfigured ? 'Configured' : 'Missing'}</span>`;
   const keyPill = `<span class="pill ${meta.geminiKeyConfigured ? 'ok' : 'bad'}">${meta.geminiKeyConfigured ? 'Configured' : 'Missing'}</span>`;
