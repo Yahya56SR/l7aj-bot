@@ -2051,7 +2051,8 @@ function renderEconomy() {
         field('Bank limit', numberInput('economy.bankLimit', eco.bankLimit, { min: 0, max: 100000 }), 'Maximum coins storable in the bank.'),
         field('Work minimum', numberInput('economy.workMin', eco.workMin, { min: 0, max: 10000 })),
         field('Work maximum', numberInput('economy.workMax', eco.workMax, { min: 0, max: 10000 })),
-      ], 2)}, { subtitle: '/economy balance, daily, work, pay, shop, buy, inventory' })}`;
+      ], 2)}`, { subtitle: '/economy balance, daily, work, pay, shop, buy, inventory' })}
+`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2066,7 +2067,8 @@ function renderSuggest() {
     (or a forum thread) with 👍 / 👎 voting. Admins set the status with <code>/suggest status</code>.</p>
 
     ${card('Suggestions', `${toggle('suggest.enabled', sug.enabled, 'Enable suggestions', 'While this is off, no new suggestions can be submitted.')}
-      ${grid([field('Channel', channelSelect('suggest.channelId', sug.channelId))], 1)}, { subtitle: 'Where suggestions are posted' })}`;
+      ${grid([field('Channel', channelSelect('suggest.channelId', sug.channelId))], 1)}`, { subtitle: 'Where suggestions are posted' })}
+`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2084,7 +2086,8 @@ function renderStarboard() {
       field('Channel', channelSelect('starboard.channelId', sb.channelId)),
       field('Emoji', textInput('starboard.emoji', sb.emoji, { maxlength: 50, placeholder: '⭐' })),
       field('Threshold', numberInput('starboard.threshold', sb.threshold, { min: 1, max: 50 }), 'Number of star reactions required.'),
-    ], 3)}, { subtitle: 'Star emoji, threshold and destination channel' })}`;
+    ], 3)}`, { subtitle: 'Star emoji, threshold and destination channel' })}
+`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2134,7 +2137,8 @@ function renderTempVc() {
       ${grid([
         field('Create channel', channelSelect('tempvc.createChannelId', vc.createChannelId), 'Members join this channel to spawn a temp VC.'),
         field('Category', categorySelect('tempvc.categoryId', vc.categoryId), 'New temp VCs are created here.'),
-      ], 2)}, { subtitle: '/tempvc setup, limit, name, kick, config' })}`;
+      ], 2)}`, { subtitle: '/tempvc setup, limit, name, kick, config' })}
+`;
 }
 
 /* ------------------------------------------------------------------ */
