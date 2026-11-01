@@ -1919,6 +1919,14 @@ function renderL7aj() {
         ${toggle('l7aj.memoryEnabled', cfg.memoryEnabled, 'Enable memory', 'Let L7aj save and recall durable notes about members.')}
       </div>`, { subtitle: 'Cooldowns, length and capabilities' })}
 
+    ${card('Tool categories', `${grid([
+        toggle('l7aj.knowledgeEnabled', cfg.knowledgeEnabled, 'Community knowledge', 'Server rules, FAQ, announcements, events and community statistics.'),
+        toggle('l7aj.webEnabled', cfg.webEnabled, 'Internet tools', 'Web search, webpage fetch and news search.'),
+        toggle('l7aj.islamicEnabled', cfg.islamicEnabled, 'Islamic knowledge', 'Quran, Hadith, prayer times and Hijri date.'),
+        toggle('l7aj.schedulingEnabled', cfg.schedulingEnabled, 'Scheduled messages', 'Send future messages that survive restarts.'),
+        toggle('l7aj.attachmentsEnabled', cfg.attachmentsEnabled, 'Attachments and media', 'Read text attachments, documents and analyze images.'),
+      ], 2)}`, { subtitle: 'Capability groups you can enable or disable individually' })}
+
     ${card('Character prompt', `${field(
       'System prompt',
       textarea('l7aj.systemPrompt', cfg.systemPrompt, { rows: 18 }),

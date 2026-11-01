@@ -147,6 +147,11 @@
     "toolsEnabled": true,
     "memoryEnabled": true,
     "minecraftServerAddress": "",
+    "webEnabled": true,
+    "islamicEnabled": true,
+    "schedulingEnabled": true,
+    "attachmentsEnabled": true,
+    "knowledgeEnabled": true,
     "temperature": 1,
     "requestTimeoutMs": 20000
   },
