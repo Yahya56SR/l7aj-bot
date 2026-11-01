@@ -283,8 +283,10 @@ export interface EconomyConfig {
 export interface SuggestConfig {
   /** Master switch for suggestions */
   enabled: boolean;
-  /** Channel where suggestions are posted */
+  /** Forum channel where suggestions are posted */
   channelId: string;
+  /** Staff channel where noted suggestions are reposted and pinned */
+  staffChannelId: string;
 }
 
 /** Starboard channel, emoji and threshold */
@@ -317,6 +319,10 @@ export interface TempVcConfig {
   createChannelId: string;
   /** Category where temp VCs are created */
   categoryId: string;
+  /** Channel where the temp VC control panel is posted */
+  panelChannelId: string;
+  /** Message id of the posted panel (managed by the bot) */
+  panelMessageId: string;
 }
 
 /** Anti-nuke role/channel/ban/kick protection */
@@ -626,6 +632,7 @@ const DEFAULT_CONFIG: BotConfig = {
   suggest: {
     enabled: false,
     channelId: '',
+    staffChannelId: '',
   },
   starboard: {
     channelId: '',
@@ -642,6 +649,8 @@ const DEFAULT_CONFIG: BotConfig = {
     enabled: false,
     createChannelId: '',
     categoryId: '',
+    panelChannelId: '',
+    panelMessageId: '',
   },
   antinuke: {
     enabled: false,
@@ -1100,6 +1109,7 @@ function sanitizeConfig(cfg: BotConfig): void {
 
   cfg.suggest.enabled = asBool(cfg.suggest.enabled, false);
   cfg.suggest.channelId = asString(cfg.suggest.channelId);
+  cfg.suggest.staffChannelId = asString(cfg.suggest.staffChannelId);
 
   cfg.starboard.channelId = asString(cfg.starboard.channelId);
   cfg.starboard.emoji = asString(cfg.starboard.emoji, '⭐').slice(0, 50);
@@ -1112,6 +1122,8 @@ function sanitizeConfig(cfg: BotConfig): void {
   cfg.tempvc.enabled = asBool(cfg.tempvc.enabled, false);
   cfg.tempvc.createChannelId = asString(cfg.tempvc.createChannelId);
   cfg.tempvc.categoryId = asString(cfg.tempvc.categoryId);
+  cfg.tempvc.panelChannelId = asString(cfg.tempvc.panelChannelId);
+  cfg.tempvc.panelMessageId = asString(cfg.tempvc.panelMessageId);
 
   cfg.antinuke.enabled = asBool(cfg.antinuke.enabled, false);
   cfg.antinuke.punishment = asString(cfg.antinuke.punishment, 'none') as 'none' | 'kick' | 'ban' | 'timeout';

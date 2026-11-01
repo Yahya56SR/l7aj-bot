@@ -21,6 +21,7 @@ import {
   type Client,
   type Guild,
   type GuildBasedChannel,
+  type Message,
   type TextChannel,
   type User,
 } from 'discord.js';
@@ -41,6 +42,10 @@ import {
   getOpenTickets,
   getTicketCount,
   getTotalMemberCount,
+  getShopItem,
+  listShopItems,
+  addShopItem,
+  removeShopItem,
 } from '../db';
 import { buildPanelRows } from '../handlers/buttons';
 import { TICKET_OPEN_PREFIX } from '../handlers/tickets';
@@ -55,6 +60,26 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 8;
+
+const TEMPVC_PREFIX = 'tempvc:';
+
+const TEMPVC_PANEL_BUTTONS = [
+  { id: 'rename', label: 'RENAME', emoji: '✏️', style: ButtonStyle.Secondary },
+  { id: 'limit', label: 'LIMIT', emoji: '👥', style: ButtonStyle.Secondary },
+  { id: 'lock', label: 'LOCK', emoji: '🔒', style: ButtonStyle.Secondary },
+  { id: 'unlock', label: 'UNLOCK', emoji: '🔓', style: ButtonStyle.Secondary },
+  { id: 'invite', label: 'INVITE', emoji: '✉️', style: ButtonStyle.Secondary },
+  { id: 'delete', label: 'DELETE', emoji: '🗑️', style: ButtonStyle.Danger },
+  { id: 'hide', label: 'HIDE', emoji: '👁️‍🗨️', style: ButtonStyle.Secondary },
+  { id: 'show', label: 'SHOW', emoji: '👁️', style: ButtonStyle.Secondary },
+  { id: 'trust', label: 'TRUST', emoji: '✅', style: ButtonStyle.Success },
+  { id: 'untrust', label: 'UNTRUST', emoji: '❌', style: ButtonStyle.Secondary },
+  { id: 'claim', label: 'CLAIM', emoji: '📥', style: ButtonStyle.Secondary },
+  { id: 'transfer', label: 'TRANSFER', emoji: '🔄', style: ButtonStyle.Secondary },
+  { id: 'kick', label: 'KICK', emoji: '👢', style: ButtonStyle.Danger },
+  { id: 'block', label: 'BLOCK', emoji: '🚫', style: ButtonStyle.Danger },
+  { id: 'unblock', label: 'UNBLOCK', emoji: '✅', style: ButtonStyle.Secondary },
+];
 
 class HttpError extends Error {
   constructor(
@@ -424,6 +449,101 @@ async function handleRequest(
       if (!text) throw new HttpError(400, 'Provide some text to classify.');
       const result = await testAiModeration(text);
       sendJson(res, 200, result);
+      return;
+    }
+
+    case 'GET /api/shop': {
+      sendJson(res, 200, { items: listShopItems() });
+      return;
+    }
+
+    case 'POST /api/shop': {
+      const body = await readJson(req);
+      const { id, name, price, description, roleId, stock } = body;
+      if (!id || !name || typeof price !== 'number') {
+        throw new HttpError(400, 'Expected id, name, and price.');
+      }
+      addShopItem({ id, name, price, description: description || '', roleId: roleId || undefined, stock: stock !== undefined ? stock : undefined });
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    case 'DELETE /api/shop': {
+      const body = await readJson(req);
+      const id = typeof body.id === 'string' ? body.id : '';
+      if (!id) throw new HttpError(400, 'Expected id.');
+      if (!removeShopItem(id)) throw new HttpError(404, 'Shop item not found.');
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    case 'POST /api/actions/publish-tempvc-panel': {
+      const cfg = getConfig();
+      if (!cfg.tempvc.createChannelId || !cfg.tempvc.categoryId) {
+        throw new HttpError(400, 'Set up temp VC first with /tempvc setup.');
+      }
+      if (!cfg.tempvc.panelChannelId) {
+        throw new HttpError(400, 'Pick a panel channel first.');
+      }
+      const channel = deps.client.channels.cache.get(cfg.tempvc.panelChannelId);
+      if (!channel || !channel.isTextBased() || channel.isDMBased()) {
+        throw new HttpError(400, 'The configured panel channel is not a text channel.');
+      }
+      const textChannel = channel as TextChannel;
+
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle('🔊 Temporary Voice Control Panel')
+        .setDescription(
+          'Use the buttons below to manage your temporary voice channel. ' +
+          'Buttons only work when you are in a temp VC you own (or claimed).',
+        )
+        .setTimestamp();
+
+      const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+      for (let i = 0; i < TEMPVC_PANEL_BUTTONS.length; i += 5) {
+        const row = new ActionRowBuilder<ButtonBuilder>();
+        for (const btn of TEMPVC_PANEL_BUTTONS.slice(i, i + 5)) {
+          row.addComponents(
+            new ButtonBuilder()
+              .setCustomId(`${TEMPVC_PREFIX}${btn.id}`)
+              .setLabel(btn.label)
+              .setEmoji(btn.emoji)
+              .setStyle(btn.style),
+          );
+        }
+        rows.push(row);
+      }
+
+      const existingMessageId = cfg.tempvc.panelMessageId;
+      let message: Message | null = null;
+      if (existingMessageId) {
+        try {
+          message = await textChannel.messages.fetch(existingMessageId).catch(() => null);
+        } catch {
+          message = null;
+        }
+      }
+
+      if (message) {
+        await message.edit({ embeds: [embed], components: rows });
+      } else {
+        message = await textChannel.send({ embeds: [embed], components: rows });
+      }
+
+      replaceConfig(
+        {
+          ...getConfig(),
+          tempvc: {
+            ...getConfig().tempvc,
+            panelChannelId: textChannel.id,
+            panelMessageId: message.id,
+          },
+        },
+        { preserveSecrets: true },
+      );
+
+      sendJson(res, 200, { ok: true, created: !existingMessageId, messageId: message.id });
       return;
     }
 

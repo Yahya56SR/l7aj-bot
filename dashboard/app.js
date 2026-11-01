@@ -10,6 +10,7 @@ const state = {
   health: null,
   guild: { available: false, id: '', name: '', channels: [], categories: [], roles: [] },
   stats: null,
+  shop: [],
   active: 'overview',
   saving: false,
 };
@@ -163,11 +164,12 @@ async function boot() {
 }
 
 async function loadData() {
-  const [config, guild, stats, health] = await Promise.all([
+  const [config, guild, stats, health, shop] = await Promise.all([
     api('/api/config'),
     api('/api/guild'),
     api('/api/stats'),
     api('/api/health'),
+    api('/api/shop').catch(() => ({ items: [] })),
   ]);
 
   state.config = config.config;
@@ -177,6 +179,7 @@ async function loadData() {
   state.guild = guild;
   state.stats = stats;
   state.health = health;
+  state.shop = shop.items || [];
 
   updateMetaUi();
   updateDirty();
@@ -476,6 +479,46 @@ async function onDocumentClick(event) {
         redraw();
         toast('Stats refreshed.', 'info');
         return;
+      case 'shop-add': {
+        const id = document.getElementById('new-shop-id').value.trim();
+        const name = document.getElementById('new-shop-name').value.trim();
+        const price = Number(document.getElementById('new-shop-price').value);
+        const stock = document.getElementById('new-shop-stock').value.trim();
+        const desc = document.getElementById('new-shop-desc').value.trim();
+        if (!id || !name || !Number.isFinite(price)) {
+          toast('Enter a valid id, name, and price.', 'error');
+          return;
+        }
+        await api('/api/shop', {
+          method: 'POST',
+          body: { id, name, price, description: desc, stock: stock ? Number(stock) : undefined },
+        });
+        document.getElementById('new-shop-id').value = '';
+        document.getElementById('new-shop-name').value = '';
+        document.getElementById('new-shop-price').value = '';
+        document.getElementById('new-shop-stock').value = '';
+        document.getElementById('new-shop-desc').value = '';
+        const shop = await api('/api/shop');
+        state.shop = shop.items || [];
+        redraw();
+        toast('Shop item added.', 'success');
+        return;
+      }
+      case 'shop-remove': {
+        const id = button.dataset.id;
+        if (!id || !window.confirm(`Remove shop item \`${id}\`?`)) return;
+        await api('/api/shop', { method: 'DELETE', body: { id } });
+        const shop = await api('/api/shop');
+        state.shop = shop.items || [];
+        redraw();
+        toast('Shop item removed.', 'success');
+        return;
+      }
+      case 'tempvc-panel': {
+        await api('/api/actions/publish-tempvc-panel', { method: 'POST', body: {} });
+        toast('Temp VC panel posted.', 'success');
+        return;
+      }
       default:
         return;
     }
@@ -2041,6 +2084,31 @@ function renderStats() {
 function renderEconomy() {
   const cfg = state.config;
   const eco = cfg.economy || {};
+  const shop = state.shop || [];
+
+  const shopRows = shop.length
+    ? shop
+        .map(
+          (item) => `<tr>
+            <td><code>${esc(item.id)}</code></td>
+            <td>${esc(item.name)}</td>
+            <td style="text-align:right">${esc(item.price)} coins</td>
+            <td>${esc(item.stock === undefined ? '∞' : item.stock)}</td>
+            <td>${esc(item.description || '')}</td>
+            <td style="text-align:right"><button class="btn small danger" data-action="shop-remove" data-id="${esc(item.id)}">Remove</button></td>
+          </tr>`,
+        )
+        .join('')
+    : emptyRow(6, 'No shop items yet. Add one below.');
+
+  const addShop = `<div class="row">
+    <input class="input" id="new-shop-id" placeholder="Item id" style="max-width:140px">
+    <input class="input" id="new-shop-name" placeholder="Name" style="max-width:160px">
+    <input class="input" id="new-shop-price" type="number" min="0" placeholder="Price" style="max-width:100px">
+    <input class="input" id="new-shop-stock" type="number" min="0" placeholder="Stock (empty=∞)" style="max-width:110px">
+    <input class="input" id="new-shop-desc" placeholder="Description" style="max-width:200px">
+    <button class="btn small" data-action="shop-add">Add item</button>
+  </div>`;
 
   return `<p class="intro">Members earn coins from daily rewards and work, can pay each other, and buy items from the server shop.
     Balances and the shop live in <code>data/talaba.json</code>.</p>
@@ -2052,6 +2120,12 @@ function renderEconomy() {
         field('Work minimum', numberInput('economy.workMin', eco.workMin, { min: 0, max: 10000 })),
         field('Work maximum', numberInput('economy.workMax', eco.workMax, { min: 0, max: 10000 })),
       ], 2)}`, { subtitle: '/economy balance, daily, work, pay, shop, buy, inventory' })}
+
+    ${card('Server Shop', `<div class="table-wrap"><table>
+        <thead><tr><th>ID</th><th>Name</th><th>Price</th><th>Stock</th><th>Description</th><th></th></tr></thead>
+        <tbody>${shopRows}</tbody>
+      </table></div>
+      ${addShop}`, { subtitle: 'Items members can buy with /economy buy' })}
 `;
 }
 
@@ -2137,7 +2211,11 @@ function renderTempVc() {
       ${grid([
         field('Create channel', channelSelect('tempvc.createChannelId', vc.createChannelId), 'Members join this channel to spawn a temp VC.'),
         field('Category', categorySelect('tempvc.categoryId', vc.categoryId), 'New temp VCs are created here.'),
-      ], 2)}`, { subtitle: '/tempvc setup, limit, name, kick, config' })}
+        field('Panel channel', channelSelect('tempvc.panelChannelId', vc.panelChannelId), 'Channel where the control panel is posted.'),
+      ], 3)}
+      <div class="btn-row"><button class="btn small" data-action="tempvc-panel">Post / refresh panel</button><span class="muted tiny">Posts the button control panel to the configured channel.</span></div>
+      ${vc.panelMessageId ? `<span class="hint">Panel message: <code>${esc(vc.panelMessageId)}</code></span>` : ''}
+    `, { subtitle: '/tempvc setup, limit, name, kick, config' })}
 `;
 }
 

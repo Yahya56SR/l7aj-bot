@@ -559,11 +559,16 @@ interface ReminderData {
 interface SuggestionData {
   messageId: string;
   channelId: string;
+  staffChannelId?: string;
   authorId: string;
   content: string;
-  status: 'open' | 'accepted' | 'rejected' | 'implemented';
+  status: 'open' | 'approved' | 'denied' | 'noted';
   upvotes: string[];
   downvotes: string[];
+  tagApplied?: string;
+  notedAt?: number;
+  deniedAt?: number;
+  staffMessageId?: string;
 }
 
 interface AfkData {
@@ -859,7 +864,7 @@ export function getDueReminders(now = Date.now()): ReminderData[] {
 /* ------------------------------------------------------------------ */
 
 export function setSuggestion(data: SuggestionData): void {
-  cache.suggestions[data.messageId] = data;
+  cache.suggestions[data.messageId] = { ...data };
   save(cache);
 }
 
@@ -873,10 +878,52 @@ export function listSuggestions(status?: string): SuggestionData[] {
     .sort((a, b) => b.upvotes.length - a.upvotes.length);
 }
 
+export function listSuggestionsByVotes(
+  status?: string,
+  sortBy: 'up' | 'down' | 'net' = 'net',
+): SuggestionData[] {
+  return Object.values(cache.suggestions)
+    .filter((s) => !status || s.status === status)
+    .sort((a, b) => {
+      const aUp = a.upvotes.length;
+      const aDown = a.downvotes.length;
+      const bUp = b.upvotes.length;
+      const bDown = b.downvotes.length;
+      if (sortBy === 'up') return bUp - aUp;
+      if (sortBy === 'down') return bDown - aDown;
+      return (bUp - bDown) - (aUp - aDown);
+    });
+}
+
 export function updateSuggestionStatus(messageId: string, status: string): boolean {
   const s = cache.suggestions[messageId];
   if (!s) return false;
   s.status = status as SuggestionData['status'];
+  cache.suggestions[messageId] = s;
+  save(cache);
+  return true;
+}
+
+export function setSuggestionTag(
+  messageId: string,
+  tag: string,
+  staffChannelId?: string,
+  staffMessageId?: string,
+): boolean {
+  const s = cache.suggestions[messageId];
+  if (!s) return false;
+  s.tagApplied = tag;
+  if (tag === 'NOTED') {
+    s.status = 'noted';
+    s.notedAt = Date.now();
+  } else if (tag === 'DENIED') {
+    s.status = 'denied';
+    s.deniedAt = Date.now();
+  } else if (tag === 'APPROVED') {
+    s.status = 'approved';
+  }
+  if (staffChannelId) s.staffChannelId = staffChannelId;
+  if (staffMessageId) s.staffMessageId = staffMessageId;
   cache.suggestions[messageId] = s;
   save(cache);
   return true;

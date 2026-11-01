@@ -202,7 +202,9 @@
   "tempvc": {
     "enabled": false,
     "createChannelId": "CREATE_TEMPVC_CHANNEL_ID_HERE",
-    "categoryId": "TEMPVC_CATEGORY_ID_HERE"
+    "categoryId": "TEMPVC_CATEGORY_ID_HERE",
+    "panelChannelId": "TEMPVC_PANEL_CHANNEL_ID_HERE",
+    "panelMessageId": ""
   },
   "antinuke": {
     "enabled": false,

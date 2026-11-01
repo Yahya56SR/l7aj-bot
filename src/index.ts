@@ -26,6 +26,7 @@ import * as afkCmd from './commands/afk';
 import * as starboardCmd from './commands/starboard';
 import * as invitesCmd from './commands/invites';
 import * as tempvcCmd from './commands/tempvc';
+import type { TempvcButtonInteraction } from './commands/tempvc';
 import * as antinukeCmd from './commands/antinuke';
 import { handleMessageCreate } from './events/messageCreate';
 import { handleVoiceStateUpdate, handleVoiceTick, seedVoiceSessions } from './events/voiceStateUpdate';
@@ -443,6 +444,21 @@ client.on('interactionCreate', async (interaction) => {
         if (!interaction.replied && !interaction.deferred) {
           await interaction
             .reply({ content: 'Something went wrong handling that ticket button.', ephemeral: true })
+            .catch(() => undefined);
+        }
+      }
+      return;
+    }
+    // Temp VC control panel buttons
+    if (customId.startsWith('tempvc:')) {
+      try {
+        const btn = interaction as unknown as TempvcButtonInteraction;
+        await tempvcCmd.handleTempvcButton(btn);
+      } catch (err) {
+        console.error('Temp VC button interaction failed:', err);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction
+            .reply({ content: 'Something went wrong handling that temp VC button.', ephemeral: true })
             .catch(() => undefined);
         }
       }
