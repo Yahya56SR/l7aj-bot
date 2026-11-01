@@ -158,6 +158,16 @@ export interface L7ajConfig {
   memoryEnabled: boolean;
   /** Optional Minecraft server address for the live status tool. */
   minecraftServerAddress: string;
+  /** Web search, fetch webpage and news tools. */
+  webEnabled: boolean;
+  /** Islamic knowledge tools (Quran, Hadith, prayer times, Hijri date). */
+  islamicEnabled: boolean;
+  /** Scheduled messages (survive restarts, stored in the database). */
+  schedulingEnabled: boolean;
+  /** Attachment and media tools. */
+  attachmentsEnabled: boolean;
+  /** Community knowledge tools (rules, FAQ, announcements, events, stats). */
+  knowledgeEnabled: boolean;
   /** Sampling temperature (0-2). */
   temperature: number;
   /** Per-event response timeout in milliseconds (5000-60000). */
@@ -494,6 +504,11 @@ const DEFAULT_CONFIG: BotConfig = {
     toolsEnabled: true,
     memoryEnabled: true,
     minecraftServerAddress: '',
+    webEnabled: true,
+    islamicEnabled: true,
+    schedulingEnabled: true,
+    attachmentsEnabled: true,
+    knowledgeEnabled: true,
     temperature: 1,
     requestTimeoutMs: 20_000,
   },
@@ -840,6 +855,11 @@ function sanitizeConfig(cfg: BotConfig): void {
   l7aj.toolsEnabled = asBool(l7aj.toolsEnabled, true);
   l7aj.memoryEnabled = asBool(l7aj.memoryEnabled, true);
   l7aj.minecraftServerAddress = asString(l7aj.minecraftServerAddress).trim().slice(0, 200);
+  l7aj.webEnabled = asBool(l7aj.webEnabled, true);
+  l7aj.islamicEnabled = asBool(l7aj.islamicEnabled, true);
+  l7aj.schedulingEnabled = asBool(l7aj.schedulingEnabled, true);
+  l7aj.attachmentsEnabled = asBool(l7aj.attachmentsEnabled, true);
+  l7aj.knowledgeEnabled = asBool(l7aj.knowledgeEnabled, true);
   l7aj.temperature = asNumber(l7aj.temperature, 1, 0, 2);
   l7aj.requestTimeoutMs = asInt(l7aj.requestTimeoutMs, 20_000, 5_000, 60_000);
   // Replies are now chosen per message by the model, so drop the old static toggle.

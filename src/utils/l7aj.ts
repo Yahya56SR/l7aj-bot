@@ -21,6 +21,11 @@ import {
 } from './gemini-persona';
 import { addMemory, countMemories, recallMemories } from './l7aj-memory';
 import { collectMessageMedia } from './l7aj-media';
+import {
+  buildToolDeclarations as buildL7ajToolDeclarations,
+  createToolExecutor as createL7ajToolExecutor,
+  type L7ajToolContext,
+} from './l7aj-tools';
 
 /* ------------------------------------------------------------------ */
 /* State                                                               */
@@ -204,14 +209,17 @@ export async function testL7ajPersona(client: Client, text: string): Promise<L7a
   const testPersona = buildPersona(
     cfg,
     apiKey,
-    buildToolDeclarations(cfg),
+    buildToolDeclarations(cfg, {
+      client,
+      guild,
+      channel,
+    }),
     client.user?.id ?? '',
   );
   const executor = createToolExecutor({
     guild,
     channel,
     trigger: null,
-    history: () => localHistory,
   });
 
   try {
@@ -301,14 +309,18 @@ async function flushBatch(channelId: string, messages: Message[]): Promise<void>
     const client = createPersona(
       cfg,
       apiKey,
-      buildToolDeclarations(cfg),
+      buildToolDeclarations(cfg, {
+        client: trigger.client,
+        guild: trigger.guild,
+        channel,
+        triggerMessageId: trigger.id,
+      }),
       trigger.client.user?.id ?? '',
     );
     const executor = createToolExecutor({
       guild: trigger.guild,
       channel,
       trigger,
-      history: () => history.get(channelId) ?? [],
     });
     decision = await client.ask(payload, executor, cfg.requestTimeoutMs, media);
   } catch (err) {
@@ -786,157 +798,23 @@ function buildPersona(
 /* Tool declarations                                                   */
 /* ------------------------------------------------------------------ */
 
-function buildToolDeclarations(cfg: L7ajConfig): FunctionDeclaration[] {
-  const tools: FunctionDeclaration[] = [];
+function buildToolDeclarations(cfg: L7ajConfig, ctx: L7ajToolContext): FunctionDeclaration[] {
+  const tools = buildL7ajToolDeclarations(ctx, cfg);
 
-  if (cfg.toolsEnabled) {
-    tools.push(
-      {
-        name: 'get_recent_messages',
-        description: 'Read more of the current channel history than the snapshot you were given.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            limit: { type: Type.INTEGER, description: `How many messages (1-${MAX_TOOL_LIMIT}).` },
-          },
-        },
+  // `search_history` is the classic tool name used by the persona prompt;
+  // alias it to the server-wide search tool from the new toolset.
+  tools.push({
+    name: 'search_history',
+    description: 'Search the recent channel history for a word, topic or member name.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        query: { type: Type.STRING, description: 'Text or member name to look for.' },
+        limit: { type: Type.INTEGER, description: `How many matches (1-${MAX_TOOL_LIMIT}).` },
       },
-      {
-        name: 'search_history',
-        description: 'Search the recent channel history for a word, topic or member name.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            query: { type: Type.STRING, description: 'Text or member name to look for.' },
-            limit: { type: Type.INTEGER, description: `How many matches (1-${MAX_TOOL_LIMIT}).` },
-          },
-          required: ['query'],
-        },
-      },
-      {
-        name: 'get_member_info',
-        description: 'Roles, join date, account age and nickname for one server member.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            member: { type: Type.STRING, description: 'Member id, @mention, username or display name.' },
-          },
-          required: ['member'],
-        },
-      },
-      {
-        name: 'get_user_stats',
-        description: 'XP, level, leaderboard rank and voice minutes for one member.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            member: { type: Type.STRING, description: 'Member id, @mention, username or display name.' },
-          },
-          required: ['member'],
-        },
-      },
-      {
-        name: 'get_leaderboard',
-        description: 'The server XP leaderboard, highest first.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            limit: { type: Type.INTEGER, description: `How many rows (1-${MAX_TOOL_LIMIT}).` },
-          },
-        },
-      },
-      {
-        name: 'get_server_info',
-        description: 'Server name, member count, creation date and description.',
-        parameters: { type: Type.OBJECT, properties: {} },
-      },
-      {
-        name: 'get_voice_members',
-        description: 'Members currently connected to voice channels.',
-        parameters: { type: Type.OBJECT, properties: {} },
-      },
-      {
-        name: 'get_channel_info',
-        description: 'Current channel name, topic, type and category.',
-        parameters: { type: Type.OBJECT, properties: {} },
-      },
-      {
-        name: 'get_current_time',
-        description: 'The real current date and time in Morocco and UTC.',
-        parameters: { type: Type.OBJECT, properties: {} },
-      },
-      {
-        name: 'react_to_message',
-        description:
-          'React to the latest message with one emoji. This is not a spoken message; ' +
-          'you may react and then stay silent.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            emoji: { type: Type.STRING, description: 'One Unicode emoji or a custom emoji like <:name:id>.' },
-          },
-          required: ['emoji'],
-        },
-      },
-    );
-  }
-
-  // Formatting helpers stay available even when the broader information tools
-  // are off: the model needs real emoji markdown and sticker ids to use them.
-  tools.push(
-    {
-      name: 'get_server_emojis',
-      description:
-        'List every custom emoji in this server with its exact Discord markdown ' +
-        '(`<:name:id>` or `<a:name:id>`). Use it before using a custom emoji you have not seen.',
-      parameters: { type: Type.OBJECT, properties: {} },
+      required: ['query'],
     },
-    {
-      name: 'get_server_stickers',
-      description:
-        'List the stickers available in this server with their real sticker ids. ' +
-        'Use it before calling send_sticker.',
-      parameters: { type: Type.OBJECT, properties: {} },
-    },
-  );
-
-  if (cfg.memoryEnabled) {
-    tools.push(
-      {
-        name: 'recall_facts',
-        description: 'Read durable notes you saved earlier about this server or one member.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            about: { type: Type.STRING, description: 'Optional member id, @mention, username or name.' },
-            limit: { type: Type.INTEGER, description: 'How many notes (1-50).' },
-          },
-        },
-      },
-      {
-        name: 'remember_fact',
-        description:
-          'Save one durable fact about a member or the server so you can recall it in later conversations. ' +
-          'Only save information the member shared publicly; never secrets or sensitive personal data.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            fact: { type: Type.STRING, description: 'One short, factual note.' },
-            about: { type: Type.STRING, description: 'Optional member id, @mention, username or name.' },
-          },
-          required: ['fact'],
-        },
-      },
-    );
-  }
-
-  if (cfg.toolsEnabled && cfg.minecraftServerAddress.trim()) {
-    tools.push({
-      name: 'get_minecraft_status',
-      description: 'Live online status, player count and version of the configured Minecraft server.',
-      parameters: { type: Type.OBJECT, properties: {} },
-    });
-  }
+  });
 
   return tools;
 }
@@ -945,53 +823,32 @@ function buildToolDeclarations(cfg: L7ajConfig): FunctionDeclaration[] {
 /* Tool execution                                                      */
 /* ------------------------------------------------------------------ */
 
+function createToolExecutor(context: ToolContext): PersonaToolExecutor {
+  const baseExecutor = createL7ajToolExecutor({
+    client: context.trigger?.client ?? context.channel.client,
+    guild: context.guild,
+    channel: context.channel,
+    triggerMessageId: context.trigger?.id ?? undefined,
+  });
+
+  return async (call: PersonaToolCall): Promise<Record<string, unknown>> => {
+    const name = call.name ?? '';
+    // `search_history` is the classic tool name; alias it to the new search tool.
+    if (name === 'search_history') {
+      return baseExecutor({
+        name: 'search_discord_messages',
+        args: { query: call.args?.query, channel_id: undefined, limit: call.args?.limit },
+      });
+    }
+    return baseExecutor({ name, args: call.args ?? {} });
+  };
+}
+
 interface ToolContext {
   guild: Guild;
   channel: Channel;
   trigger: Message | null;
-  history: () => HistoryEntry[];
-}
-
-function createToolExecutor(context: ToolContext): PersonaToolExecutor {
-  return async (call: PersonaToolCall): Promise<Record<string, unknown>> => {
-    const name = call.name ?? '';
-    const args = call.args ?? {};
-
-    switch (name) {
-      case 'get_recent_messages':
-        return getRecentMessages(context, args.limit);
-      case 'search_history':
-        return searchHistory(context, args.query, args.limit);
-      case 'get_member_info':
-        return await getMemberInfo(context, args.member);
-      case 'get_user_stats':
-        return await getUserStats(context, args.member);
-      case 'get_leaderboard':
-        return getLeaderboardTool(context, args.limit);
-      case 'get_server_info':
-        return getServerInfo(context);
-      case 'get_voice_members':
-        return getVoiceMembers(context);
-      case 'get_channel_info':
-        return getChannelInfo(context);
-      case 'get_server_emojis':
-        return getServerEmojis(context);
-      case 'get_server_stickers':
-        return getServerStickers(context);
-      case 'get_current_time':
-        return getCurrentTime();
-      case 'react_to_message':
-        return await reactToMessage(context, args.emoji);
-      case 'recall_facts':
-        return await recallFacts(context, args.about, args.limit);
-      case 'remember_fact':
-        return await rememberFact(context, args.fact, args.about);
-      case 'get_minecraft_status':
-        return await getMinecraftStatus();
-      default:
-        return { ok: false, error: `Unknown tool: ${name}` };
-    }
-  };
+  history?: () => HistoryEntry[];
 }
 
 function toLimit(value: unknown, fallback: number, max: number): number {
@@ -1002,7 +859,7 @@ function toLimit(value: unknown, fallback: number, max: number): number {
 
 function getRecentMessages(context: ToolContext, rawLimit: unknown): Record<string, unknown> {
   const limit = toLimit(rawLimit, 20, MAX_TOOL_LIMIT);
-  const entries = context.history()
+  const entries = context.history?.()
     .slice(-limit)
     .map((entry) => ({
       time: moroccoClock(entry.timestamp),
@@ -1020,7 +877,7 @@ function searchHistory(context: ToolContext, rawQuery: unknown, rawLimit: unknow
 
   const limit = toLimit(rawLimit, 10, MAX_TOOL_LIMIT);
   const matches = context
-    .history()
+    .history?.()
     .filter(
       (entry) =>
         entry.content.toLowerCase().includes(query) ||

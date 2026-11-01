@@ -25,6 +25,7 @@ import { logCommandUsage } from './utils/logger';
 import { startDashboard } from './dashboard/server';
 import { startLiveLeaderboard, stopLiveLeaderboard } from './utils/liveLeaderboard';
 import { closeL7aj, primeL7ajHistory } from './utils/l7aj';
+import { startScheduledMessageScheduler, stopScheduledMessageScheduler } from './utils/l7aj-tools';
 
 dotenv.config();
 loadConfig();
@@ -62,6 +63,7 @@ console.log(
 
 let voiceTickInterval: ReturnType<typeof setInterval> | null = null;
 let ticketSweepInterval: ReturnType<typeof setInterval> | null = null;
+let scheduledSchedulerInterval: ReturnType<typeof setInterval> | null = null;
 
 client.on('clientReady', () => {
   console.log(`Logged in as ${client.user?.tag} (${client.user?.id})`);
@@ -101,6 +103,9 @@ client.on('clientReady', () => {
   // interval. Reading the interval on every tick means dashboard edits apply
   // without a restart.
   startLiveLeaderboard(client);
+
+  // Send due scheduled messages every 30 seconds.
+  scheduledSchedulerInterval = startScheduledMessageScheduler(client);
 
   // Give the L7aj persona conversation context immediately after a restart.
   void primeL7ajHistory(client).catch((err) => console.error('[L7aj] History priming failed:', err));
@@ -259,6 +264,7 @@ process.on('SIGINT', async () => {
   console.log('Shutting down...');
   if (voiceTickInterval) clearInterval(voiceTickInterval);
   if (ticketSweepInterval) clearInterval(ticketSweepInterval);
+  stopScheduledMessageScheduler(scheduledSchedulerInterval);
   stopLiveLeaderboard();
   closeL7aj();
   dashboardServer?.close();
@@ -270,6 +276,7 @@ process.on('SIGTERM', async () => {
   console.log('Shutting down...');
   if (voiceTickInterval) clearInterval(voiceTickInterval);
   if (ticketSweepInterval) clearInterval(ticketSweepInterval);
+  stopScheduledMessageScheduler(scheduledSchedulerInterval);
   stopLiveLeaderboard();
   closeL7aj();
   dashboardServer?.close();
