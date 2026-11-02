@@ -46,6 +46,12 @@ import {
   listShopItems,
   addShopItem,
   removeShopItem,
+  addTask,
+  getTask,
+  listTasks,
+  updateTaskStatus,
+  updateTask,
+  deleteTask,
 } from '../db';
 import { buildPanelRows } from '../handlers/buttons';
 import { TICKET_OPEN_PREFIX } from '../handlers/tickets';
@@ -473,6 +479,60 @@ async function handleRequest(
       const id = typeof body.id === 'string' ? body.id : '';
       if (!id) throw new HttpError(400, 'Expected id.');
       if (!removeShopItem(id)) throw new HttpError(404, 'Shop item not found.');
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    case 'PUT /api/shop': {
+      const body = await readJson(req);
+      const { id, name, price, description, roleId, stock } = body;
+      if (!id || !name || typeof price !== 'number') {
+        throw new HttpError(400, 'Expected id, name, and price.');
+      }
+      const existing = getShopItem(id);
+      if (!existing) throw new HttpError(404, 'Shop item not found.');
+      addShopItem({ id, name, price, description: description || existing.description, roleId: roleId || existing.roleId, stock: stock !== undefined ? stock : existing.stock });
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    case 'GET /api/tasks': {
+      const url = new URL(req.url || '', 'http://localhost');
+      const status = (url.searchParams.get('status') || undefined) as 'NONE' | 'IN_PROGRESS' | 'DONE' | 'CANCELED' | undefined;
+      sendJson(res, 200, { tasks: listTasks(status) });
+      return;
+    }
+
+    case 'POST /api/tasks': {
+      const body = await readJson(req);
+      const { title, description, status, sourceType, sourceId, createdBy, assignedTo } = body;
+      if (!title || !createdBy) {
+        throw new HttpError(400, 'Expected title and createdBy.');
+      }
+      const task = addTask({ title, description: description || '', status: (status || 'NONE') as 'NONE' | 'IN_PROGRESS' | 'DONE' | 'CANCELED', sourceType: sourceType || 'manual', sourceId, createdBy, assignedTo });
+      sendJson(res, 200, { ok: true, task });
+      return;
+    }
+
+    case 'PUT /api/tasks': {
+      const body = await readJson(req);
+      const { id, status, ...updates } = body;
+      if (!id) throw new HttpError(400, 'Expected id.');
+      if (status) {
+        if (!updateTaskStatus(id, status as 'NONE' | 'IN_PROGRESS' | 'DONE' | 'CANCELED')) throw new HttpError(404, 'Task not found.');
+      }
+      if (Object.keys(updates).length > 0) {
+        if (!updateTask(id, updates)) throw new HttpError(404, 'Task not found.');
+      }
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    case 'DELETE /api/tasks': {
+      const body = await readJson(req);
+      const id = typeof body.id === 'string' ? body.id : '';
+      if (!id) throw new HttpError(400, 'Expected id.');
+      if (!deleteTask(id)) throw new HttpError(404, 'Task not found.');
       sendJson(res, 200, { ok: true });
       return;
     }
