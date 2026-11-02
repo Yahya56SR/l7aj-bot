@@ -2215,7 +2215,7 @@ function renderSuggest() {
         field('Noted threshold', numberInput('suggest.notedThreshold', sug.notedThreshold, { min: 1, max: 100 }), 'Upvotes needed to auto-tag NOTED.'),
         field('Like emoji', textInput('suggest.likeEmoji', sug.likeEmoji, { maxlength: 50, placeholder: '👍' }), 'Custom emoji for upvotes.'),
         field('Dislike emoji', textInput('suggest.dislikeEmoji', sug.dislikeEmoji, { maxlength: 50, placeholder: '👎' }), 'Custom emoji for downvotes.'),
-      ], 3)}, { subtitle: '/suggest submit, tag, list, remove' })}
+      ], 3)}`, { subtitle: '/suggest submit, tag, list, remove' })}
 `;
 }
 
@@ -2354,7 +2354,7 @@ function renderTasks() {
 
 /* ------------------------------------------------------------------ */
 /* Render: anti-nuke                                                  */
-/* ------------------------------------------------------------------ */}
+/* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
 /* Render: anti-nuke                                                  */
