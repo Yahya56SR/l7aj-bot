@@ -43,6 +43,7 @@ interface DbMeta {
   totalMembers: number;
   ticketCounter: number;         // Auto-incrementing ticket number
   warnCounter: number;           // Auto-incrementing warning number
+  taskCounter: number;           // Auto-incrementing task number
 }
 
 interface DbData {
@@ -55,7 +56,7 @@ interface DbData {
 let cache: ExtendedDbData = emptyExtendedDb();
 
 function emptyDb(): DbData {
-  return { users: {}, tickets: {}, warns: {}, meta: { totalMembers: 0, ticketCounter: 0, warnCounter: 0 } };
+  return { users: {}, tickets: {}, warns: {}, meta: { totalMembers: 0, ticketCounter: 0, warnCounter: 0, taskCounter: 0 } };
 }
 
 function numericOr(value: unknown, fallback: number): number {
@@ -123,6 +124,7 @@ function normaliseDb(raw: any): ExtendedDbData {
         economyCounter: numericOr(meta.economyCounter, 0),
         giveawayCounter: numericOr(meta.giveawayCounter, 0),
         reminderCounter: numericOr(meta.reminderCounter, 0),
+        taskCounter: numericOr(meta.taskCounter, 0),
       },
     };
   }
@@ -151,6 +153,7 @@ function normaliseDb(raw: any): ExtendedDbData {
         economyCounter: numericOr(meta.economyCounter, 0),
         giveawayCounter: numericOr(meta.giveawayCounter, 0),
         reminderCounter: numericOr(meta.reminderCounter, 0),
+        taskCounter: numericOr(meta.taskCounter, 0),
       },
     };
   }
@@ -174,7 +177,7 @@ function normaliseDb(raw: any): ExtendedDbData {
     users: raw as { [userId: string]: UserData },
     tickets: {},
     warns: {},
-    meta: { totalMembers: Object.keys(raw).length, ticketCounter: 0, warnCounter: 0, economyCounter: 0, giveawayCounter: 0, reminderCounter: 0 },
+    meta: { totalMembers: Object.keys(raw).length, ticketCounter: 0, warnCounter: 0, economyCounter: 0, giveawayCounter: 0, reminderCounter: 0, taskCounter: 0 },
   };
 }
 
@@ -571,6 +574,20 @@ interface SuggestionData {
   staffMessageId?: string;
 }
 
+/** Staff TODO task */
+interface TaskData {
+  id: string;
+  title: string;
+  description: string;
+  status: 'NONE' | 'IN_PROGRESS' | 'DONE' | 'CANCELED';
+  sourceType: 'suggestion' | 'manual';
+  sourceId?: string;
+  createdBy: string;
+  assignedTo?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface AfkData {
   userId: string;
   message: string;
@@ -611,6 +628,7 @@ interface ExtendedMeta {
   economyCounter: number;
   giveawayCounter: number;
   reminderCounter: number;
+  taskCounter: number;
 }
 
 interface ExtendedDbData {
@@ -622,6 +640,7 @@ interface ExtendedDbData {
   giveaways: { [giveawayId: string]: GiveawayData };
   reminders: { [reminderId: string]: ReminderData };
   suggestions: { [messageId: string]: SuggestionData };
+  tasks: { [taskId: string]: TaskData };
   afk: { [userId: string]: AfkData };
   invites: { [code: string]: InviteData };
   tempVC: { [channelId: string]: TempVCData };
@@ -640,6 +659,7 @@ function emptyExtendedDb(): ExtendedDbData {
     giveaways: {},
     reminders: {},
     suggestions: {},
+    tasks: {},
     afk: {},
     invites: {},
     tempVC: {},
@@ -657,6 +677,7 @@ function emptyExtendedDb(): ExtendedDbData {
       economyCounter: 0,
       giveawayCounter: 0,
       reminderCounter: 0,
+      taskCounter: 0,
     },
   };
 }
@@ -958,6 +979,58 @@ export function removeSuggestionVote(messageId: string, userId: string): boolean
 export function deleteSuggestion(messageId: string): boolean {
   if (!cache.suggestions[messageId]) return false;
   delete cache.suggestions[messageId];
+  save(cache);
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* Staff TODO tasks                                                   */
+/* ------------------------------------------------------------------ */
+
+export function addTask(data: Omit<TaskData, 'id' | 'createdAt' | 'updatedAt'>): TaskData {
+  const id = `T-${++cache.meta.taskCounter}`;
+  const task: TaskData = {
+    id,
+    ...data,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  cache.tasks[id] = task;
+  save(cache);
+  return task;
+}
+
+export function getTask(taskId: string): TaskData | undefined {
+  return cache.tasks[taskId];
+}
+
+export function listTasks(status?: TaskData['status']): TaskData[] {
+  return Object.values(cache.tasks)
+    .filter((t) => !status || t.status === status)
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function updateTaskStatus(taskId: string, status: TaskData['status']): boolean {
+  const t = cache.tasks[taskId];
+  if (!t) return false;
+  t.status = status;
+  t.updatedAt = Date.now();
+  cache.tasks[taskId] = t;
+  save(cache);
+  return true;
+}
+
+export function updateTask(taskId: string, updates: Partial<TaskData>): boolean {
+  const t = cache.tasks[taskId];
+  if (!t) return false;
+  cache.tasks[taskId] = { ...t, ...updates, updatedAt: Date.now() };
+  save(cache);
+  return true;
+}
+
+export function deleteTask(taskId: string): boolean {
+  if (!cache.tasks[taskId]) return false;
+  delete cache.tasks[taskId];
   save(cache);
   return true;
 }

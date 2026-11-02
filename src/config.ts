@@ -287,6 +287,12 @@ export interface SuggestConfig {
   channelId: string;
   /** Staff channel where noted suggestions are reposted and pinned */
   staffChannelId: string;
+  /** Upvote threshold to auto-tag NOTED */
+  notedThreshold: number;
+  /** Custom like emoji (unicode or <:name:id>) */
+  likeEmoji: string;
+  /** Custom dislike emoji (unicode or <:name:id>) */
+  dislikeEmoji: string;
 }
 
 /** Starboard channel, emoji and threshold */
@@ -633,6 +639,9 @@ const DEFAULT_CONFIG: BotConfig = {
     enabled: false,
     channelId: '',
     staffChannelId: '',
+    notedThreshold: 10,
+    likeEmoji: '👍',
+    dislikeEmoji: '👎',
   },
   starboard: {
     channelId: '',
@@ -1110,6 +1119,9 @@ function sanitizeConfig(cfg: BotConfig): void {
   cfg.suggest.enabled = asBool(cfg.suggest.enabled, false);
   cfg.suggest.channelId = asString(cfg.suggest.channelId);
   cfg.suggest.staffChannelId = asString(cfg.suggest.staffChannelId);
+  cfg.suggest.notedThreshold = asInt(cfg.suggest.notedThreshold, 10, 1, 100);
+  cfg.suggest.likeEmoji = asString(cfg.suggest.likeEmoji, '👍').slice(0, 50);
+  cfg.suggest.dislikeEmoji = asString(cfg.suggest.dislikeEmoji, '👎').slice(0, 50);
 
   cfg.starboard.channelId = asString(cfg.starboard.channelId);
   cfg.starboard.emoji = asString(cfg.starboard.emoji, '⭐').slice(0, 50);

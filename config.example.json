@@ -186,7 +186,11 @@
   },
   "suggest": {
     "enabled": false,
-    "channelId": "SUGGESTION_CHANNEL_ID_HERE"
+    "channelId": "SUGGESTION_CHANNEL_ID_HERE",
+    "staffChannelId": "STAFF_CHANNEL_ID_HERE",
+    "notedThreshold": 10,
+    "likeEmoji": "👍",
+    "dislikeEmoji": "👎"
   },
   "starboard": {
     "channelId": "STARBOARD_CHANNEL_ID_HERE",

@@ -464,6 +464,20 @@ client.on('interactionCreate', async (interaction) => {
       }
       return;
     }
+    // Suggestion staff action buttons (approve/deny)
+    if (customId.startsWith('suggest:')) {
+      try {
+        await suggestCmd.handleSuggestionButton(interaction as any);
+      } catch (err) {
+        console.error('Suggestion button interaction failed:', err);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction
+            .reply({ content: 'Something went wrong handling that suggestion button.', ephemeral: true })
+            .catch(() => undefined);
+        }
+      }
+      return;
+    }
     try {
       await handleButtonInteraction(interaction);
     } catch (err) {

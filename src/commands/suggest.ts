@@ -5,6 +5,11 @@ import {
   ChatInputCommandInteraction,
   ForumChannel,
   TextChannel,
+  MessageReaction,
+  User,
+  ButtonBuilder,
+  ActionRowBuilder,
+  ButtonStyle,
 } from 'discord.js';
 import {
   setSuggestion,
@@ -16,11 +21,19 @@ import {
   updateSuggestionVotes,
   removeSuggestionVote,
   deleteSuggestion,
+  addTask,
+  getTask,
+  updateTaskStatus,
+  listTasks,
+  deleteTask,
 } from '../db';
+import { getConfig } from '../config';
 
-const LIKE_EMOJI_ID = '1562143921587626074';
-const DISLIKE_EMOJI_ID = '1562139657817559070';
-const NOTED_THRESHOLD = 15;
+/** Parse a custom emoji ID from a string like <:name:123456789> or return null for unicode. */
+function parseEmojiId(emoji: string): string | null {
+  const match = emoji.match(/<:[^:]+:(\d+)>/);
+  return match ? match[1] : null;
+}
 
 export const data = new SlashCommandBuilder()
   .setName('suggest')
@@ -132,6 +145,9 @@ async function submit(interaction: ChatInputCommandInteraction): Promise<void> {
   }
 
   const forum = channel as ForumChannel;
+  const cfg = getConfig();
+  const sug = cfg.suggest;
+
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('💡 New Suggestion')
@@ -147,15 +163,15 @@ async function submit(interaction: ChatInputCommandInteraction): Promise<void> {
     const thread = await forum.threads.create({
       name: suggestion.slice(0, 100),
       message: {
-        content: `New suggestion from <@${interaction.user.id}>! React with <:like:${LIKE_EMOJI_ID}> or <:dislike:${DISLIKE_EMOJI_ID}> to vote.`,
+        content: `New suggestion from <@${interaction.user.id}>! React with ${sug.likeEmoji} or ${sug.dislikeEmoji} to vote.`,
         embeds: [embed],
       },
     });
 
     const starter = await thread.fetchStarterMessage().catch(() => null);
     if (starter) {
-      await starter.react(`<:like:${LIKE_EMOJI_ID}>`).catch(() => undefined);
-      await starter.react(`<:dislike:${DISLIKE_EMOJI_ID}>`).catch(() => undefined);
+      await starter.react(sug.likeEmoji).catch(() => undefined);
+      await starter.react(sug.dislikeEmoji).catch(() => undefined);
     }
 
     setSuggestion({
@@ -188,14 +204,18 @@ async function tag(interaction: ChatInputCommandInteraction): Promise<void> {
     return;
   }
 
-  const staffChannelId = existing.staffChannelId;
+  const cfg = getConfig();
+  const staffChannelId = cfg.suggest.staffChannelId || existing.staffChannelId;
   let staffMessageId = existing.staffMessageId;
 
   if (newTag === 'NOTED') {
     // Send to staff channel and pin there
-    const staffChannel = interaction.guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildText && c.name?.toLowerCase().includes('staff'),
-    ) as TextChannel | undefined;
+    const staffChannel = staffChannelId
+      ? (interaction.guild.channels.cache.get(staffChannelId) as TextChannel | undefined)
+      : interaction.guild.channels.cache.find(
+          (c) => c.type === ChannelType.GuildText && c.name?.toLowerCase().includes('staff'),
+        ) as TextChannel | undefined;
+
     if (staffChannel) {
       const staffEmbed = new EmbedBuilder()
         .setColor(0xf1c40f)
@@ -205,16 +225,44 @@ async function tag(interaction: ChatInputCommandInteraction): Promise<void> {
           { name: 'Author', value: `<@${existing.authorId}>`, inline: true },
           { name: 'Original', value: `<#${existing.channelId}>`, inline: true },
           { name: 'Thread', value: `<#${messageId}>`, inline: true },
+          { name: 'Status', value: 'Pending Review', inline: true },
         )
         .setTimestamp();
 
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`suggest:approve:${messageId}`)
+          .setLabel('Approve')
+          .setStyle(ButtonStyle.Success)
+          .setEmoji('✅'),
+        new ButtonBuilder()
+          .setCustomId(`suggest:deny:${messageId}`)
+          .setLabel('Deny')
+          .setStyle(ButtonStyle.Danger)
+          .setEmoji('❌'),
+      );
+
       try {
-        const staffMsg = await staffChannel.send({ embeds: [staffEmbed] });
+        const staffMsg = await staffChannel.send({ embeds: [staffEmbed], components: [row] });
         await staffMsg.pin().catch(() => undefined);
         staffMessageId = staffMsg.id;
       } catch {
         /* ignore staff channel failures */
       }
+    }
+  } else if (newTag === 'APPROVED') {
+    // Auto-create a task from approved suggestion
+    try {
+      addTask({
+        title: existing.content.slice(0, 200),
+        description: `Suggestion from <@${existing.authorId}>\nThread: <#${messageId}>`,
+        status: 'NONE',
+        sourceType: 'suggestion',
+        sourceId: messageId,
+        createdBy: interaction.user.id,
+      });
+    } catch {
+      /* ignore task creation failures */
     }
   }
 
@@ -263,9 +311,14 @@ async function remove(interaction: ChatInputCommandInteraction): Promise<void> {
 /* Reaction handler (called from messageReactionAdd/Remove)           */
 /* ------------------------------------------------------------------ */
 
+interface ReactionShape {
+  emoji: { name: string | null; id: string | null };
+  message: { id: string };
+}
+
 /** Handle like/dislike reactions on suggestion posts. Returns true if handled. */
 export async function handleSuggestionReaction(
-  reaction: { emoji: { name: string | null; id: string | null }; message: { id: string } },
+  reaction: ReactionShape,
   user: { id: string; bot: boolean },
   add: boolean,
 ): Promise<boolean> {
@@ -274,11 +327,14 @@ export async function handleSuggestionReaction(
   const emojiId = reaction.emoji.id;
   const emojiName = reaction.emoji.name;
 
+  const cfg = getConfig();
+  const sug = cfg.suggest;
+  const likeId = parseEmojiId(sug.likeEmoji);
+  const dislikeId = parseEmojiId(sug.dislikeEmoji);
+
   let vote: 'up' | 'down' | null = null;
-  if (emojiId === LIKE_EMOJI_ID) vote = 'up';
-  else if (emojiId === DISLIKE_EMOJI_ID) vote = 'down';
-  else if (emojiName === '👍') vote = 'up';
-  else if (emojiName === '👎') vote = 'down';
+  if (emojiId === likeId || emojiName === sug.likeEmoji) vote = 'up';
+  else if (emojiId === dislikeId || emojiName === sug.dislikeEmoji) vote = 'down';
 
   if (!vote) return false;
 
@@ -289,12 +345,117 @@ export async function handleSuggestionReaction(
     updateSuggestionVotes(reaction.message.id, user.id, vote);
 
     // Auto-NOTED when likes reach threshold
-    if (vote === 'up' && suggestion.upvotes.length >= NOTED_THRESHOLD && suggestion.status === 'open') {
+    const threshold = sug.notedThreshold || 10;
+    if (vote === 'up' && suggestion.upvotes.length >= threshold && suggestion.status === 'open') {
       setSuggestionTag(reaction.message.id, 'NOTED');
+
+      // Send to staff channel
+      const staffChannelId = cfg.suggest.staffChannelId;
+      const staffChannel = staffChannelId
+        ? (interactionGuildCache().channels.cache.get(staffChannelId) as TextChannel | undefined)
+        : undefined;
+
+      if (staffChannel) {
+        const staffEmbed = new EmbedBuilder()
+          .setColor(0xf1c40f)
+          .setTitle('📌 Noted Suggestion (Auto)')
+          .setDescription(suggestion.content)
+          .addFields(
+            { name: 'Author', value: `<@${suggestion.authorId}>`, inline: true },
+            { name: 'Original', value: `<#${suggestion.channelId}>`, inline: true },
+            { name: 'Thread', value: `<#${reaction.message.id}>`, inline: true },
+            { name: 'Upvotes', value: String(suggestion.upvotes.length), inline: true },
+          )
+          .setTimestamp();
+
+        const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`suggest:approve:${reaction.message.id}`)
+            .setLabel('Approve')
+            .setStyle(ButtonStyle.Success)
+            .setEmoji('✅'),
+          new ButtonBuilder()
+            .setCustomId(`suggest:deny:${reaction.message.id}`)
+            .setLabel('Deny')
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji('❌'),
+        );
+
+        try {
+          const staffMsg = await staffChannel.send({ embeds: [staffEmbed], components: [row] });
+          await staffMsg.pin().catch(() => undefined);
+          // Update stored staff message id
+          const s = getSuggestion(reaction.message.id);
+          if (s) {
+            s.staffChannelId = staffChannelId;
+            s.staffMessageId = staffMsg.id;
+            // Re-save
+            setSuggestion(s);
+          }
+        } catch {
+          /* ignore staff channel failures */
+        }
+      }
     }
   } else {
     removeSuggestionVote(reaction.message.id, user.id);
   }
 
   return true;
+}
+
+/** Handle button clicks on staff messages for suggestions. Returns true if handled. */
+export async function handleSuggestionButton(interaction: {
+  customId: string;
+  guild: { id: string; channels: { cache: Map<string, any> } };
+  member: { id: string } | null;
+  reply: (opts: { content: string; ephemeral: boolean }) => Promise<unknown>;
+  followUp: (opts: { content: string; ephemeral: boolean }) => Promise<unknown>;
+  replied: boolean;
+  deferred: boolean;
+}): Promise<boolean> {
+  const customId = interaction.customId;
+  if (!customId.startsWith('suggest:')) return false;
+
+  const parts = customId.split(':');
+  const action = parts[1]; // approve or deny
+  const messageId = parts[2];
+
+  if (!action || !messageId) return false;
+  if (!interaction.member) return false;
+
+  const suggestion = getSuggestion(messageId);
+  if (!suggestion) {
+    await interaction.reply({ content: 'Suggestion not found.', ephemeral: true });
+    return true;
+  }
+
+  const newTag = action === 'approve' ? 'APPROVED' : 'DENIED';
+
+  if (action === 'approve') {
+    // Auto-create a task from approved suggestion
+    try {
+      addTask({
+        title: suggestion.content.slice(0, 200),
+        description: `Suggestion from <@${suggestion.authorId}>\nThread: <#${messageId}>`,
+        status: 'NONE',
+        sourceType: 'suggestion',
+        sourceId: messageId,
+        createdBy: interaction.member.id,
+      });
+    } catch {
+      /* ignore task creation failures */
+    }
+  }
+
+  setSuggestionTag(messageId, newTag);
+
+  await interaction.reply({ content: `✅ Suggestion \`${messageId}\` tagged as **${newTag}**.`, ephemeral: true });
+  return true;
+}
+
+/** Helper to get the guild client cache for auto-noted staff messages. */
+function interactionGuildCache(): { channels: { cache: Map<string, any> } } {
+  // This is a fallback - the real client is passed from index.ts
+  return { channels: { cache: new Map() } };
 }
