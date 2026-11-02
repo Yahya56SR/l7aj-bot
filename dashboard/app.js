@@ -11,6 +11,7 @@ const state = {
   guild: { available: false, id: '', name: '', channels: [], categories: [], roles: [] },
   stats: null,
   shop: [],
+  tasks: [],
   active: 'overview',
   saving: false,
 };
@@ -82,6 +83,7 @@ const ICONS = {
     '<circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 5.6a3.4 3.4 0 0 1 0 6.8"/><path d="M18 20a5.6 5.6 0 0 0-2-4.3"/>',
   history: '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/><path d="M12 7.5V12l3 2"/>',
   spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/>',
+  task: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="13 2 13 9 15 9"/><circle cx="1" cy="4" r="2"/>',
   bot: '<rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M8.5 13h.01M15.5 13h.01M9.5 17h5"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
   link: '<path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.2-1.2"/>',
@@ -116,6 +118,7 @@ const sections = [
   { id: 'afk', label: 'AFK', icon: 'clock', group: 'Community', subtitle: 'Away-from-keyboard status', render: renderAfk },
   { id: 'invites', label: 'Invites', icon: 'link', group: 'Community', subtitle: 'Track who invited whom', render: renderInvites },
   { id: 'tempvc', label: 'Temp Voice', icon: 'present', group: 'Community', subtitle: 'Join-to-create temporary voice channels', render: renderTempVc },
+  { id: 'tasks', label: 'Staff Tasks', icon: 'task', group: 'Community', subtitle: 'Staff TODO list from approved suggestions', render: renderTasks },
   { id: 'antinuke', label: 'Anti-Nuke', icon: 'megaphone', group: 'Protection', subtitle: 'Role, channel, ban and kick protection', render: renderAntiNuke },
   { id: 'advanced', label: 'Advanced', icon: 'advanced', group: 'System', subtitle: 'Secrets, raw JSON and environment', render: renderAdvanced },
 ];
@@ -164,12 +167,13 @@ async function boot() {
 }
 
 async function loadData() {
-  const [config, guild, stats, health, shop] = await Promise.all([
+  const [config, guild, stats, health, shop, tasks] = await Promise.all([
     api('/api/config'),
     api('/api/guild'),
     api('/api/stats'),
     api('/api/health'),
     api('/api/shop').catch(() => ({ items: [] })),
+    api('/api/tasks').catch(() => ({ tasks: [] })),
   ]);
 
   state.config = config.config;
@@ -180,6 +184,7 @@ async function loadData() {
   state.stats = stats;
   state.health = health;
   state.shop = shop.items || [];
+  state.tasks = tasks.tasks || [];
 
   updateMetaUi();
   updateDirty();
@@ -512,6 +517,47 @@ async function onDocumentClick(event) {
         state.shop = shop.items || [];
         redraw();
         toast('Shop item removed.', 'success');
+        return;
+      }
+      case 'task-add': {
+        const title = document.getElementById('new-task-title').value.trim();
+        const desc = document.getElementById('new-task-desc').value.trim();
+        const status = document.getElementById('new-task-status').value;
+        if (!title) {
+          toast('Enter a task title.', 'error');
+          return;
+        }
+        await api('/api/tasks', {
+          method: 'POST',
+          body: { title, description: desc, status, createdBy: 'dashboard' },
+        });
+        document.getElementById('new-task-title').value = '';
+        document.getElementById('new-task-desc').value = '';
+        const tasks = await api('/api/tasks');
+        state.tasks = tasks.tasks || [];
+        redraw();
+        toast('Task added.', 'success');
+        return;
+      }
+      case 'task-delete': {
+        const id = button.dataset.taskId;
+        if (!id || !window.confirm(`Delete task \`${id}\`?`)) return;
+        await api('/api/tasks', { method: 'DELETE', body: { id } });
+        const tasks = await api('/api/tasks');
+        state.tasks = tasks.tasks || [];
+        redraw();
+        toast('Task deleted.', 'success');
+        return;
+      }
+      case 'task-status': {
+        const id = button.dataset.taskId;
+        const status = button.value;
+        if (!id) return;
+        await api('/api/tasks', { method: 'PUT', body: { id, status } });
+        const tasks = await api('/api/tasks');
+        state.tasks = tasks.tasks || [];
+        redraw();
+        toast('Task status updated.', 'success');
         return;
       }
       case 'tempvc-panel': {
@@ -2019,6 +2065,10 @@ function renderStats() {
     return `<div class="empty">Stats are loading…</div>`;
   }
 
+  const suggestions = state.tasks || [];
+  const openTasks = suggestions.filter((t) => t.status !== 'DONE' && t.status !== 'CANCELED').length;
+  const doneTasks = suggestions.filter((t) => t.status === 'DONE').length;
+
   const leaderboard = stats.xp.leaderboard.length
     ? stats.xp.leaderboard
         .map((row, index) => {
@@ -2057,6 +2107,9 @@ function renderStats() {
         .join('')
     : emptyRow(5, 'No tickets recorded yet.');
 
+  const shopItems = state.shop || [];
+  const totalShopValue = shopItems.reduce((sum, item) => sum + (item.price || 0), 0);
+
   return `<div class="btn-row" style="margin-bottom:14px">
       <button class="btn small" data-action="refresh-stats">Refresh</button>
       <span class="muted tiny">Read from data/talaba.json — not editable here.</span>
@@ -2066,6 +2119,9 @@ function renderStats() {
       ${statCard('All-time members', stats.xp.totalMembers, 'joins tracked by the bot', 'history', 'violet')}
       ${statCard('Open tickets', stats.tickets.open, 'open or claimed', 'tickets', 'amber')}
       ${statCard('Total tickets', stats.tickets.total, 'all time', 'spark', 'green')}
+      ${statCard('Shop items', shopItems.length, 'available for purchase', 'coins', 'yellow')}
+      ${statCard('Open tasks', openTasks, 'pending staff action', 'task', 'red')}
+      ${statCard('Completed tasks', doneTasks, 'finished by staff', 'done', 'green')}
     </div>
     ${card('XP leaderboard', `<div class="table-wrap"><table>
         <thead><tr><th>#</th><th>Member</th><th>Level</th><th>XP</th><th>Voice</th></tr></thead>
@@ -2074,7 +2130,17 @@ function renderStats() {
     ${card('Recent tickets', `<div class="table-wrap"><table>
         <thead><tr><th>ID</th><th>Status</th><th>Opened by</th><th>Panel</th><th>Created</th></tr></thead>
         <tbody>${tickets}</tbody>
-      </table></div>`, { subtitle: 'The 15 most recent tickets' })}`;
+      </table></div>`, { subtitle: 'The 15 most recent tickets' })}
+    ${card('Economy overview', `<div class="table-wrap"><table>
+        <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+        <tbody>
+          <tr><td>Daily reward</td><td style="text-align:right">${esc((state.config && state.config.economy && state.config.economy.dailyAmount) || 0)} coins</td></tr>
+          <tr><td>Work range</td><td style="text-align:right">${esc((state.config && state.config.economy && state.config.economy.workMin) || 0)} – ${esc((state.config && state.config.economy && state.config.economy.workMax) || 0)} coins</td></tr>
+          <tr><td>Bank limit</td><td style="text-align:right">${esc((state.config && state.config.economy && state.config.economy.bankLimit) || 0)} coins</td></tr>
+          <tr><td>Shop items</td><td style="text-align:right">${esc(shopItems.length)}</td></tr>
+          <tr><td>Total shop value</td><td style="text-align:right">${esc(totalShopValue)} coins</td></tr>
+        </tbody>
+      </table></div>`, { subtitle: 'Economy configuration at a glance' })}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2137,11 +2203,19 @@ function renderSuggest() {
   const cfg = state.config;
   const sug = cfg.suggest || {};
 
-  return `<p class="intro">Members submit suggestions with <code>/suggest submit</code>. Each suggestion is posted as a message
-    (or a forum thread) with 👍 / 👎 voting. Admins set the status with <code>/suggest status</code>.</p>
+  return `<p class="intro">Members submit suggestions with <code>/suggest submit</code>. Each suggestion is posted in a forum
+    channel with ${esc(sug.likeEmoji || '👍')} / ${esc(sug.dislikeEmoji || '👎')} voting. When upvotes reach the threshold, the
+    suggestion is auto-tagged NOTED and sent to the staff channel. Staff can APPROVE or DENY from the staff message, the
+    dashboard, or commands.</p>
 
     ${card('Suggestions', `${toggle('suggest.enabled', sug.enabled, 'Enable suggestions', 'While this is off, no new suggestions can be submitted.')}
-      ${grid([field('Channel', channelSelect('suggest.channelId', sug.channelId))], 1)}`, { subtitle: 'Where suggestions are posted' })}
+      ${grid([
+        field('Forum channel', channelSelect('suggest.channelId', sug.channelId), 'Suggestions are posted here as forum threads.'),
+        field('Staff channel', channelSelect('suggest.staffChannelId', sug.staffChannelId), 'Noted suggestions are reposted here for review.'),
+        field('Noted threshold', numberInput('suggest.notedThreshold', sug.notedThreshold, { min: 1, max: 100 }), 'Upvotes needed to auto-tag NOTED.'),
+        field('Like emoji', textInput('suggest.likeEmoji', sug.likeEmoji, { maxlength: 50, placeholder: '👍' }), 'Custom emoji for upvotes.'),
+        field('Dislike emoji', textInput('suggest.dislikeEmoji', sug.dislikeEmoji, { maxlength: 50, placeholder: '👎' }), 'Custom emoji for downvotes.'),
+      ], 3)}, { subtitle: '/suggest submit, tag, list, remove' })}
 `;
 }
 
@@ -2218,6 +2292,69 @@ function renderTempVc() {
     `, { subtitle: '/tempvc setup, limit, name, kick, config' })}
 `;
 }
+
+/* ------------------------------------------------------------------ */
+/* Render: staff tasks                                                */
+/* ------------------------------------------------------------------ */
+
+function renderTasks() {
+  const tasks = state.tasks || [];
+
+  const statusPill = (status) => {
+    const classes = { NONE: 'accent', IN_PROGRESS: 'warn', DONE: 'ok', CANCELED: 'bad' };
+    return `<span class="pill ${classes[status] || 'accent'}">${esc(status)}</span>`;
+  };
+
+  const taskRows = tasks.length
+    ? tasks
+        .map(
+          (task) => `<tr>
+            <td><code>${esc(task.id)}</code></td>
+            <td>${esc(task.title)}</td>
+            <td>${esc(task.description || '')}</td>
+            <td style="text-align:right">${statusPill(task.status)}</td>
+            <td>${esc(task.sourceType === 'suggestion' ? 'Suggestion' : 'Manual')}</td>
+            <td>${esc(task.createdBy)}</td>
+            <td style="text-align:right">
+              <select class="input" data-action="task-status" data-task-id="${esc(task.id)}" style="max-width:120px">
+                <option value="NONE" ${task.status === 'NONE' ? 'selected' : ''}>None</option>
+                <option value="IN_PROGRESS" ${task.status === 'IN_PROGRESS' ? 'selected' : ''}>In Progress</option>
+                <option value="DONE" ${task.status === 'DONE' ? 'selected' : ''}>Done</option>
+                <option value="CANCELED" ${task.status === 'CANCELED' ? 'selected' : ''}>Canceled</option>
+              </select>
+              <button class="btn small danger" data-action="task-delete" data-task-id="${esc(task.id)}" style="margin-left:6px">×</button>
+            </td>
+          </tr>`,
+        )
+        .join('')
+    : emptyRow(7, 'No tasks yet. Approved suggestions auto-create tasks, or add one below.');
+
+  const addTaskForm = `<div class="row">
+    <input class="input" id="new-task-title" placeholder="Task title" style="max-width:200px">
+    <input class="input" id="new-task-desc" placeholder="Description" style="max-width:300px">
+    <select class="input" id="new-task-status" style="max-width:120px">
+      <option value="NONE">None</option>
+      <option value="IN_PROGRESS">In Progress</option>
+      <option value="DONE">Done</option>
+      <option value="CANCELED">Canceled</option>
+    </select>
+    <button class="btn small" data-action="task-add">Add task</button>
+  </div>`;
+
+  return `<p class="intro">Staff TODO list tracks approved suggestions and manual tasks. Tasks auto-create when a suggestion is
+    tagged APPROVED. Change status from the dropdown or delete tasks as needed.</p>
+
+    ${card('Staff Tasks', `<div class="table-wrap"><table>
+        <thead><tr><th>ID</th><th>Title</th><th>Description</th><th>Status</th><th>Source</th><th>Created by</th><th></th></tr></thead>
+        <tbody>${taskRows}</tbody>
+      </table></div>
+      ${addTaskForm}`, { subtitle: 'Manage staff TODO items and approved suggestions' })}
+`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Render: anti-nuke                                                  */
+/* ------------------------------------------------------------------ */}
 
 /* ------------------------------------------------------------------ */
 /* Render: anti-nuke                                                  */
